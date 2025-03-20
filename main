@@ -54,7 +54,6 @@
 
 =======
 
-
 ---
 # ELIG-DeterminationCycle-Daily.yml
 # This playbook runs the daily eligibility determination cycle
@@ -78,24 +77,24 @@
     - name: Process eligibility determinations
       debug:
         msg: "Processing eligibility determination {{ item }}"
-      loop: "{{ range(1, pending_determinations + 1) | list }}"
+      loop: "{{ range(1, (pending_determinations | int) + 1) | list }}"
       register: determination_results
       
     - name: Simulate successful determinations
       set_fact:
-        successful_determinations: "{{ successful_determinations + 1 }}"
+        successful_determinations: "{{ successful_determinations | int + 1 }}"
       loop: "{{ determination_results.results }}"
       when: 
         - item is succeeded
-        - item.item % 10 != 0  # 90% success rate
+        - (item.item | int) % 10 != 0  # 90% success rate
         
     - name: Simulate failed determinations
       set_fact:
-        failed_determinations: "{{ failed_determinations + 1 }}"
+        failed_determinations: "{{ failed_determinations | int + 1 }}"
       loop: "{{ determination_results.results }}"
       when: 
         - item is succeeded
-        - item.item % 10 == 0  # 10% failure rate
+        - (item.item | int) % 10 == 0  # 10% failure rate
         
     - name: Update eligibility database
       debug:
@@ -104,7 +103,7 @@
     - name: Send notifications for failed determinations
       debug:
         msg: "Sending notifications for {{ failed_determinations }} failed determinations"
-      when: failed_determinations > 0
+      when: failed_determinations | int > 0
         
     - name: Summarize results
       debug:
@@ -118,8 +117,6 @@
           eligibility_failed_count: "{{ failed_determinations }}"
           eligibility_status: "completed"
         aggregate: yes
-
-
 
 ======
 
@@ -145,7 +142,7 @@
       
     - name: Set simulation variables
       set_fact:
-        claims_to_process: "{{ eligibility_success_count | int * 2 | int }}"
+        claims_to_process: "{{ (eligibility_success_count | int) * 2 }}"
         processed_claims: 0
         rejected_claims: 0
         
@@ -156,24 +153,24 @@
     - name: Process claims batch
       debug:
         msg: "Processing claim {{ item }}"
-      loop: "{{ range(1, claims_to_process + 1) | list }}"
+      loop: "{{ range(1, (claims_to_process | int) + 1) | list }}"
       register: claims_results
       
     - name: Simulate successful claims
       set_fact:
-        processed_claims: "{{ processed_claims + 1 }}"
+        processed_claims: "{{ processed_claims | int + 1 }}"
       loop: "{{ claims_results.results }}"
       when: 
         - item is succeeded
-        - item.item % 5 != 0  # 80% success rate
+        - (item.item | int) % 5 != 0  # 80% success rate
         
     - name: Simulate rejected claims
       set_fact:
-        rejected_claims: "{{ rejected_claims + 1 }}"
+        rejected_claims: "{{ rejected_claims | int + 1 }}"
       loop: "{{ claims_results.results }}"
       when: 
         - item is succeeded
-        - item.item % 5 == 0  # 20% rejection rate
+        - (item.item | int) % 5 == 0  # 20% rejection rate
       
     - name: Submit claims to clearinghouse
       debug:
@@ -182,7 +179,7 @@
     - name: Generate rejection reports
       debug:
         msg: "Generating reports for {{ rejected_claims }} rejected claims"
-      when: rejected_claims > 0
+      when: rejected_claims | int > 0
       
     - name: Update claims database status
       debug:
@@ -199,7 +196,6 @@
           claims_rejected_count: "{{ rejected_claims }}"
           claims_batch_status: "completed"
         aggregate: yes
-
 
 =====
 
@@ -229,7 +225,7 @@
     - name: Warn if disk space is high
       debug:
         msg: "WARNING: Disk usage is high at {{ disk_usage_pct }}%"
-      when: disk_usage_pct > 80
+      when: disk_usage_pct | int > 80
       
     - name: Simulate memory usage check
       set_fact:
@@ -242,7 +238,7 @@
     - name: Warn if memory usage is high
       debug:
         msg: "WARNING: Memory usage is high at {{ memory_usage_pct }}%"
-      when: memory_usage_pct > 75
+      when: memory_usage_pct | int > 75
       
     - name: Simulate CPU load check
       set_fact:
@@ -259,7 +255,7 @@
       
     - name: Set health status
       set_fact:
-        system_healthy: "{{ disk_usage_pct < 85 and memory_usage_pct < 80 }}"
+        system_healthy: "{{ (disk_usage_pct | int) < 85 and (memory_usage_pct | int) < 80 }}"
         
     - name: Report overall health status
       debug:
@@ -274,84 +270,79 @@
           cpu_load: "{{ cpu_load }}"
         aggregate: yes
 
-
-
-
 ====
 
 
 ---
-# PROVIDER-NPIValidation-Daily.yml
-# This playbook validates provider NPI numbers daily
+# MAINT-SystemHealthCheck-Hourly.yml
+# This playbook performs hourly system health checks
 
-- name: Provider NPI Validation
+- name: System Health Check
   hosts: localhost
   connection: local
-  gather_facts: false
-  
-  vars:
-    # These variables could come from previous steps in a workflow
-    system_health_status: "{{ system_health_status | default('healthy') }}"
-    eligibility_status: "{{ eligibility_status | default('completed') }}"
+  gather_facts: true
   
   tasks:
-    - name: Check prerequisites
+    - name: Check system resources
       debug:
-        msg: "Checking prerequisites - System status: {{ system_health_status }}, Eligibility status: {{ eligibility_status }}"
+        msg: "Checking system resources on {{ ansible_hostname }}"
       
-    - name: Set simulation variables
+    - name: Simulate disk space check
       set_fact:
-        providers_to_validate: "{{ 20 | random + 10 }}"
-        valid_count: 0
-        invalid_count: 0
+        disk_usage_pct: "{{ 75 | random + 10 }}"
         
-    - name: Retrieve provider list
+    - name: Evaluate disk space
       debug:
-        msg: "Retrieved {{ providers_to_validate }} providers for NPI validation"
-      
-    - name: Validate provider NPIs
-      debug:
-        msg: "Validating NPI for provider {{ item }}"
-      loop: "{{ range(1, providers_to_validate + 1) | list }}"
-      register: validation_results
-      
-    - name: Count valid NPIs
-      set_fact:
-        valid_count: "{{ valid_count + 1 }}"
-      loop: "{{ validation_results.results }}"
-      when: 
-        - item is succeeded
-        - item.item % 7 != 0  # ~85% valid rate
+        msg: "Current disk usage is {{ disk_usage_pct }}%"
         
-    - name: Count invalid NPIs
+    - name: Warn if disk space is high
+      debug:
+        msg: "WARNING: Disk usage is high at {{ disk_usage_pct }}%"
+      when: disk_usage_pct | int > 80
+      
+    - name: Simulate memory usage check
       set_fact:
-        invalid_count: "{{ invalid_count + 1 }}"
-      loop: "{{ validation_results.results }}"
-      when: 
-        - item is succeeded
-        - item.item % 7 == 0  # ~15% invalid rate
-      
-    - name: Update provider database with validation results
+        memory_usage_pct: "{{ 60 | random + 10 }}"
+        
+    - name: Evaluate memory usage
       debug:
-        msg: "Updating provider database with validation results"
-      
-    - name: Create report of invalid NPIs
+        msg: "Current memory usage is {{ memory_usage_pct }}%"
+        
+    - name: Warn if memory usage is high
       debug:
-        msg: "Creating report for {{ invalid_count }} providers with invalid NPIs"
-      when: invalid_count > 0
+        msg: "WARNING: Memory usage is high at {{ memory_usage_pct }}%"
+      when: memory_usage_pct | int > 75
       
-    - name: Summarize validation results
+    - name: Simulate CPU load check
+      set_fact:
+        cpu_load: "{{ 2 | random + 1 }}.{{ 99 | random }}"
+        
+    - name: Evaluate CPU load
       debug:
-        msg: "NPI validation summary: {{ providers_to_validate }} providers checked, {{ valid_count }} valid, {{ invalid_count }} invalid"
+        msg: "Current CPU load is {{ cpu_load }}"
+        
+    - name: Check database connectivity
+      debug:
+        msg: "Verifying database connectivity"
+      register: db_check
+      
+    - name: Set health status
+      set_fact:
+        system_healthy: "{{ (disk_usage_pct | int) < 85 and (memory_usage_pct | int) < 80 }}"
+        
+    - name: Report overall health status
+      debug:
+        msg: "System health status: {{ 'HEALTHY' if system_healthy else 'NEEDS ATTENTION' }}"
         
     - name: Set output for workflow
       set_stats:
         data:
-          providers_validated: "{{ providers_to_validate }}"
-          valid_npi_count: "{{ valid_count }}"
-          invalid_npi_count: "{{ invalid_count }}"
-          npi_validation_status: "completed"
+          system_health_status: "{{ 'healthy' if system_healthy else 'warning' }}"
+          disk_usage: "{{ disk_usage_pct }}"
+          memory_usage: "{{ memory_usage_pct }}"
+          cpu_load: "{{ cpu_load }}"
         aggregate: yes
+
 
 
 
@@ -394,13 +385,13 @@
     - name: Optimize tables
       debug:
         msg: "Optimizing table {{ item }}"
-      loop: "{{ range(1, tables_to_optimize + 1) | list }}"
+      loop: "{{ range(1, (tables_to_optimize | int) + 1) | list }}"
       register: optimization_results
       
     - name: Count optimized tables
       set_fact:
-        optimized_count: "{{ optimized_count + 1 }}"
-        space_reclaimed_mb: "{{ space_reclaimed_mb + (20 | random + 5) }}"
+        optimized_count: "{{ optimized_count | int + 1 }}"
+        space_reclaimed_mb: "{{ space_reclaimed_mb | int + (20 | random + 5) }}"
       loop: "{{ optimization_results.results }}"
       when: item is succeeded
       
@@ -423,7 +414,6 @@
           space_reclaimed: "{{ space_reclaimed_mb }}"
           db_optimization_status: "completed"
         aggregate: yes
-
 
 
 
