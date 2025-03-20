@@ -1,4 +1,80 @@
 ---
+# MAINT-SystemHealthCheck-Hourly.yml
+# This playbook performs hourly system health checks
+
+- name: System Health Check
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  
+  tasks:
+    - name: Check system resources
+      debug:
+        msg: "Checking system resources on {{ ansible_hostname }}"
+      
+    - name: Simulate disk space check
+      set_fact:
+        disk_usage_pct: "{{ 75 | random + 10 }}"
+        
+    - name: Evaluate disk space
+      debug:
+        msg: "Current disk usage is {{ disk_usage_pct }}%"
+        
+    - name: Warn if disk space is high
+      debug:
+        msg: "WARNING: Disk usage is high at {{ disk_usage_pct }}%"
+      when: disk_usage_pct | int > 80
+      
+    - name: Simulate memory usage check
+      set_fact:
+        memory_usage_pct: "{{ 60 | random + 10 }}"
+        
+    - name: Evaluate memory usage
+      debug:
+        msg: "Current memory usage is {{ memory_usage_pct }}%"
+        
+    - name: Warn if memory usage is high
+      debug:
+        msg: "WARNING: Memory usage is high at {{ memory_usage_pct }}%"
+      when: memory_usage_pct | int > 75
+      
+    - name: Simulate CPU load check
+      set_fact:
+        cpu_load: "{{ 2 | random + 1 }}.{{ 99 | random }}"
+        
+    - name: Evaluate CPU load
+      debug:
+        msg: "Current CPU load is {{ cpu_load }}"
+        
+    - name: Check database connectivity
+      debug:
+        msg: "Verifying database connectivity"
+      register: db_check
+      
+    - name: Set health status
+      set_fact:
+        system_healthy: "{{ (disk_usage_pct | int) < 85 and (memory_usage_pct | int) < 80 }}"
+        
+    - name: Report overall health status
+      debug:
+        msg: "System health status: {{ 'HEALTHY' if system_healthy else 'NEEDS ATTENTION' }}"
+        
+    - name: Set output for workflow
+      set_stats:
+        data:
+          system_health_status: "{{ 'healthy' if system_healthy else 'warning' }}"
+          disk_usage: "{{ disk_usage_pct }}"
+          memory_usage: "{{ memory_usage_pct }}"
+          cpu_load: "{{ cpu_load }}"
+        aggregate: yes
+
+
+
+
+
+
+
+---
 # PROVIDER-EnrollmentDaily-Process.yml
 # This playbook processes daily provider enrollment requests
 
@@ -52,7 +128,9 @@
 
 
 
-=======
+
+
+
 
 ---
 # ELIG-DeterminationCycle-Daily.yml
@@ -118,7 +196,14 @@
           eligibility_status: "completed"
         aggregate: yes
 
-======
+
+
+
+
+
+
+
+
 
 
 ---
@@ -197,223 +282,185 @@
           claims_batch_status: "completed"
         aggregate: yes
 
-=====
+
+
+
+
+
+
+
+
+
 
 
 ---
-# MAINT-SystemHealthCheck-Hourly.yml
-# This playbook performs hourly system health checks
+# PROVIDER-NPIValidation-Daily.yml
+# This playbook validates provider NPI numbers daily
 
-- name: System Health Check
-  hosts: localhost
-  connection: local
-  gather_facts: true
-  
-  tasks:
-    - name: Check system resources
-      debug:
-        msg: "Checking system resources on {{ ansible_hostname }}"
-      
-    - name: Simulate disk space check
-      set_fact:
-        disk_usage_pct: "{{ 75 | random + 10 }}"
-        
-    - name: Evaluate disk space
-      debug:
-        msg: "Current disk usage is {{ disk_usage_pct }}%"
-        
-    - name: Warn if disk space is high
-      debug:
-        msg: "WARNING: Disk usage is high at {{ disk_usage_pct }}%"
-      when: disk_usage_pct | int > 80
-      
-    - name: Simulate memory usage check
-      set_fact:
-        memory_usage_pct: "{{ 60 | random + 10 }}"
-        
-    - name: Evaluate memory usage
-      debug:
-        msg: "Current memory usage is {{ memory_usage_pct }}%"
-        
-    - name: Warn if memory usage is high
-      debug:
-        msg: "WARNING: Memory usage is high at {{ memory_usage_pct }}%"
-      when: memory_usage_pct | int > 75
-      
-    - name: Simulate CPU load check
-      set_fact:
-        cpu_load: "{{ 2 | random + 1 }}.{{ 99 | random }}"
-        
-    - name: Evaluate CPU load
-      debug:
-        msg: "Current CPU load is {{ cpu_load }}"
-        
-    - name: Check database connectivity
-      debug:
-        msg: "Verifying database connectivity"
-      register: db_check
-      
-    - name: Set health status
-      set_fact:
-        system_healthy: "{{ (disk_usage_pct | int) < 85 and (memory_usage_pct | int) < 80 }}"
-        
-    - name: Report overall health status
-      debug:
-        msg: "System health status: {{ 'HEALTHY' if system_healthy else 'NEEDS ATTENTION' }}"
-        
-    - name: Set output for workflow
-      set_stats:
-        data:
-          system_health_status: "{{ 'healthy' if system_healthy else 'warning' }}"
-          disk_usage: "{{ disk_usage_pct }}"
-          memory_usage: "{{ memory_usage_pct }}"
-          cpu_load: "{{ cpu_load }}"
-        aggregate: yes
-
-====
-
-
----
-# MAINT-SystemHealthCheck-Hourly.yml
-# This playbook performs hourly system health checks
-
-- name: System Health Check
-  hosts: localhost
-  connection: local
-  gather_facts: true
-  
-  tasks:
-    - name: Check system resources
-      debug:
-        msg: "Checking system resources on {{ ansible_hostname }}"
-      
-    - name: Simulate disk space check
-      set_fact:
-        disk_usage_pct: "{{ 75 | random + 10 }}"
-        
-    - name: Evaluate disk space
-      debug:
-        msg: "Current disk usage is {{ disk_usage_pct }}%"
-        
-    - name: Warn if disk space is high
-      debug:
-        msg: "WARNING: Disk usage is high at {{ disk_usage_pct }}%"
-      when: disk_usage_pct | int > 80
-      
-    - name: Simulate memory usage check
-      set_fact:
-        memory_usage_pct: "{{ 60 | random + 10 }}"
-        
-    - name: Evaluate memory usage
-      debug:
-        msg: "Current memory usage is {{ memory_usage_pct }}%"
-        
-    - name: Warn if memory usage is high
-      debug:
-        msg: "WARNING: Memory usage is high at {{ memory_usage_pct }}%"
-      when: memory_usage_pct | int > 75
-      
-    - name: Simulate CPU load check
-      set_fact:
-        cpu_load: "{{ 2 | random + 1 }}.{{ 99 | random }}"
-        
-    - name: Evaluate CPU load
-      debug:
-        msg: "Current CPU load is {{ cpu_load }}"
-        
-    - name: Check database connectivity
-      debug:
-        msg: "Verifying database connectivity"
-      register: db_check
-      
-    - name: Set health status
-      set_fact:
-        system_healthy: "{{ (disk_usage_pct | int) < 85 and (memory_usage_pct | int) < 80 }}"
-        
-    - name: Report overall health status
-      debug:
-        msg: "System health status: {{ 'HEALTHY' if system_healthy else 'NEEDS ATTENTION' }}"
-        
-    - name: Set output for workflow
-      set_stats:
-        data:
-          system_health_status: "{{ 'healthy' if system_healthy else 'warning' }}"
-          disk_usage: "{{ disk_usage_pct }}"
-          memory_usage: "{{ memory_usage_pct }}"
-          cpu_load: "{{ cpu_load }}"
-        aggregate: yes
-
-
-
-
-====
-
----
-# MAINT-DatabaseOptimization-Daily.yml
-# This playbook performs daily database optimization tasks
-
-- name: Database Optimization
+- name: Provider NPI Validation
   hosts: localhost
   connection: local
   gather_facts: false
   
+  vars:
+    # These variables could come from previous steps in a workflow
+    system_health_status: "{{ system_health_status | default('healthy') }}"
+    eligibility_status: "{{ eligibility_status | default('completed') }}"
+  
   tasks:
-    - name: Check system load before optimization
+    - name: Check prerequisites
       debug:
-        msg: "Checking system load before database optimization"
+        msg: "Checking prerequisites - System status: {{ system_health_status }}, Eligibility status: {{ eligibility_status }}"
       
     - name: Set simulation variables
       set_fact:
-        tables_to_optimize: "{{ 8 | random + 5 }}"
-        optimized_count: 0
-        space_reclaimed_mb: 0
+        providers_to_validate: "{{ 20 | random + 10 }}"
+        valid_count: 0
+        invalid_count: 0
         
-    - name: Identify tables needing optimization
+    - name: Retrieve provider list
       debug:
-        msg: "Identified {{ tables_to_optimize }} tables for optimization"
+        msg: "Retrieved {{ providers_to_validate }} providers for NPI validation"
       
-    - name: Create backup before optimization
+    - name: Validate provider NPIs
       debug:
-        msg: "Creating database backup before optimization"
-      register: backup_result
+        msg: "Validating NPI for provider {{ item }}"
+      loop: "{{ range(1, (providers_to_validate | int) + 1) | list }}"
+      register: validation_results
       
-    - name: Check backup status
-      debug:
-        msg: "Backup completed successfully"
-      when: backup_result is succeeded
-      
-    - name: Optimize tables
-      debug:
-        msg: "Optimizing table {{ item }}"
-      loop: "{{ range(1, (tables_to_optimize | int) + 1) | list }}"
-      register: optimization_results
-      
-    - name: Count optimized tables
+    - name: Count valid NPIs
       set_fact:
-        optimized_count: "{{ optimized_count | int + 1 }}"
-        space_reclaimed_mb: "{{ space_reclaimed_mb | int + (20 | random + 5) }}"
-      loop: "{{ optimization_results.results }}"
-      when: item is succeeded
+        valid_count: "{{ valid_count | int + 1 }}"
+      loop: "{{ validation_results.results }}"
+      when: 
+        - item is succeeded
+        - (item.item | int) % 7 != 0  # ~85% valid rate
+        
+    - name: Count invalid NPIs
+      set_fact:
+        invalid_count: "{{ invalid_count | int + 1 }}"
+      loop: "{{ validation_results.results }}"
+      when: 
+        - item is succeeded
+        - (item.item | int) % 7 == 0  # ~15% invalid rate
       
-    - name: Update statistics
+    - name: Update provider database with validation results
       debug:
-        msg: "Updating database statistics after optimization"
+        msg: "Updating provider database with validation results"
       
-    - name: Verify optimization results
+    - name: Create report of invalid NPIs
       debug:
-        msg: "Verifying database performance after optimization"
+        msg: "Creating report for {{ invalid_count }} providers with invalid NPIs"
+      when: invalid_count | int > 0
       
-    - name: Summarize optimization results
+    - name: Summarize validation results
       debug:
-        msg: "Database optimization summary: {{ optimized_count }}/{{ tables_to_optimize }} tables optimized, {{ space_reclaimed_mb }}MB space reclaimed"
+        msg: "NPI validation summary: {{ providers_to_validate }} providers checked, {{ valid_count }} valid, {{ invalid_count }} invalid"
         
     - name: Set output for workflow
       set_stats:
         data:
-          tables_optimized: "{{ optimized_count }}"
-          space_reclaimed: "{{ space_reclaimed_mb }}"
-          db_optimization_status: "completed"
+          providers_validated: "{{ providers_to_validate }}"
+          valid_npi_count: "{{ valid_count }}"
+          invalid_npi_count: "{{ invalid_count }}"
+          npi_validation_status: "completed"
         aggregate: yes
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+---
+# MAINT-SystemHealthCheck-Hourly.yml
+# This playbook performs hourly system health checks
+
+- name: System Health Check
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  
+  tasks:
+    - name: Check system resources
+      debug:
+        msg: "Checking system resources on {{ ansible_hostname }}"
+      
+    - name: Simulate disk space check
+      set_fact:
+        disk_usage_pct: "{{ 75 | random + 10 }}"
+        
+    - name: Evaluate disk space
+      debug:
+        msg: "Current disk usage is {{ disk_usage_pct }}%"
+        
+    - name: Warn if disk space is high
+      debug:
+        msg: "WARNING: Disk usage is high at {{ disk_usage_pct }}%"
+      when: disk_usage_pct | int > 80
+      
+    - name: Simulate memory usage check
+      set_fact:
+        memory_usage_pct: "{{ 60 | random + 10 }}"
+        
+    - name: Evaluate memory usage
+      debug:
+        msg: "Current memory usage is {{ memory_usage_pct }}%"
+        
+    - name: Warn if memory usage is high
+      debug:
+        msg: "WARNING: Memory usage is high at {{ memory_usage_pct }}%"
+      when: memory_usage_pct | int > 75
+      
+    - name: Simulate CPU load check
+      set_fact:
+        cpu_load: "{{ 2 | random + 1 }}.{{ 99 | random }}"
+        
+    - name: Evaluate CPU load
+      debug:
+        msg: "Current CPU load is {{ cpu_load }}"
+        
+    - name: Check database connectivity
+      debug:
+        msg: "Verifying database connectivity"
+      register: db_check
+      
+    - name: Set health status
+      set_fact:
+        system_healthy: "{{ (disk_usage_pct | int) < 85 and (memory_usage_pct | int) < 80 }}"
+        
+    - name: Report overall health status
+      debug:
+        msg: "System health status: {{ 'HEALTHY' if system_healthy else 'NEEDS ATTENTION' }}"
+        
+    - name: Set output for workflow
+      set_stats:
+        data:
+          system_health_status: "{{ 'healthy' if system_healthy else 'warning' }}"
+          disk_usage: "{{ disk_usage_pct }}"
+          memory_usage: "{{ memory_usage_pct }}"
+          cpu_load: "{{ cpu_load }}"
+        aggregate: yes
+
+
+
+
+
+
+
+
+
+
+
 
 
 
