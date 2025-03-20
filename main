@@ -1,109 +1,92 @@
 ---
-# PROVIDER-EnrollmentDaily-Process.yml
-# This playbook processes daily provider enrollment requests
+# CMS-ClaimsBatch-Daily.yml
+# This playbook processes the daily claims batch for CMS
 
-- name: Process Provider Enrollment Requests
+- name: Process CMS Claims Batch
   hosts: localhost
   connection: local
   gather_facts: false
   
   tasks:
-    - name: Check for new enrollment requests
+    - name: Display available variables
       debug:
-        msg: "Checking for new provider enrollment requests in the queue"
+        msg: "Displaying available variables from hostvars"
       
-    - name: Set simulation variables
+    - name: Check for previous job variables
+      debug:
+        var: hostvars
+      
+    - name: Set simulation variables with fallbacks
       set_fact:
-        new_requests_count: "{{ 5 | random + 1 }}"
-        processed_count: 0
+        eligibility_success_count: "{{ hostvars.localhost.eligibility_success_count | default(10) }}"
+        npi_validation_status: "{{ hostvars.localhost.npi_validation_status | default('completed') }}"
         
-    - name: Process enrollment requests
+    - name: Check eligibility and provider status
       debug:
-        msg: "Processing provider enrollment request {{ item }}"
-      loop: "{{ range(1, (new_requests_count | int) + 1) | list }}"
-      register: process_result
+        msg: "Verified prerequisite steps: Eligibility processed {{ eligibility_success_count }} records, NPI validation status is {{ npi_validation_status }}"
       
-    - name: Update processed count
+    - name: Set processing variables
       set_fact:
-        processed_count: "{{ processed_count | int + 1 }}"
-      loop: "{{ process_result.results }}"
-      when: item is succeeded
-      
-    - name: Generate NPI for new providers
-      debug:
-        msg: "Generated NPI number for request {{ item }}"
-      loop: "{{ range(1, (new_requests_count | int) + 1) | list }}"
-      
-    - name: Send confirmation emails
-      debug:
-        msg: "Sending confirmation email for processed enrollments"
+        claims_to_process: "{{ (eligibility_success_count | int) * 2 }}"
+        processed_claims: 0
+        rejected_claims: 0
         
-    - name: Summarize results
+    - name: Retrieve pending claims
       debug:
-        msg: "Provider enrollment summary: {{ new_requests_count }} new requests, {{ processed_count }} successfully processed"
+        msg: "Retrieved {{ claims_to_process }} claims for processing"
+      
+    - name: Process claims batch
+      debug:
+        msg: "Processing claim {{ item }}"
+      loop: "{{ range(1, (claims_to_process | int) + 1) | list }}"
+      register: claims_results
+      
+    - name: Simulate successful claims
+      set_fact:
+        processed_claims: "{{ processed_claims | int + 1 }}"
+      loop: "{{ claims_results.results }}"
+      when: 
+        - item is succeeded
+        - (item.item | int) % 5 != 0  # 80% success rate
+        
+    - name: Simulate rejected claims
+      set_fact:
+        rejected_claims: "{{ rejected_claims | int + 1 }}"
+      loop: "{{ claims_results.results }}"
+      when: 
+        - item is succeeded
+        - (item.item | int) % 5 == 0  # 20% rejection rate
+      
+    - name: Submit claims to clearinghouse
+      debug:
+        msg: "Submitting {{ processed_claims }} claims to clearinghouse"
+      
+    - name: Generate rejection reports
+      debug:
+        msg: "Generating reports for {{ rejected_claims }} rejected claims"
+      when: rejected_claims | int > 0
+      
+    - name: Update claims database status
+      debug:
+        msg: "Updating claims database with processing results"
+        
+    - name: Summarize batch results
+      debug:
+        msg: "Claims batch summary: {{ claims_to_process }} total claims, {{ processed_claims }} processed, {{ rejected_claims }} rejected"
         
     - name: Set output for workflow
       set_stats:
         data:
-          provider_enrollment_count: "{{ processed_count }}"
-          provider_enrollment_status: "completed"
-        aggregate: yes
-
-
----
-# PROVIDER-EnrollmentDaily-Process.yml
-# This playbook processes daily provider enrollment requests
-
-- name: Process Provider Enrollment Requests
-  hosts: localhost
-  connection: local
-  gather_facts: false
-  
-  tasks:
-    - name: Check for new enrollment requests
-      debug:
-        msg: "Checking for new provider enrollment requests in the queue"
-      
-    - name: Set simulation variables
-      set_fact:
-        new_requests_count: "{{ 5 | random + 1 }}"
-        processed_count: 0
-        
-    - name: Process enrollment requests
-      debug:
-        msg: "Processing provider enrollment request {{ item }}"
-      loop: "{{ range(1, (new_requests_count | int) + 1) | list }}"
-      register: process_result
-      
-    - name: Update processed count
-      set_fact:
-        processed_count: "{{ processed_count | int + 1 }}"
-      loop: "{{ process_result.results }}"
-      when: item is succeeded
-      
-    - name: Generate NPI for new providers
-      debug:
-        msg: "Generated NPI number for request {{ item }}"
-      loop: "{{ range(1, (new_requests_count | int) + 1) | list }}"
-      
-    - name: Send confirmation emails
-      debug:
-        msg: "Sending confirmation email for processed enrollments"
-        
-    - name: Summarize results
-      debug:
-        msg: "Provider enrollment summary: {{ new_requests_count }} new requests, {{ processed_count }} successfully processed"
-        
-    - name: Set output for workflow
-      set_stats:
-        data:
-          provider_enrollment_count: "{{ processed_count }}"
-          provider_enrollment_status: "completed"
+          claims_processed_count: "{{ processed_claims }}"
+          claims_rejected_count: "{{ rejected_claims }}"
+          claims_batch_status: "completed"
         aggregate: yes
 
 
 
 
+
+====
 
 
 
@@ -177,95 +160,7 @@
 
 
 
-
-
-
-
-
----
-# CMS-ClaimsBatch-Daily.yml
-# This playbook processes the daily claims batch for CMS
-
-- name: Process CMS Claims Batch
-  hosts: localhost
-  connection: local
-  gather_facts: false
-  
-  vars:
-    # These variables would typically come from previous steps in a workflow
-    eligibility_success_count: "{{ eligibility_success_count | default(10) }}"
-    provider_enrollment_status: "{{ provider_enrollment_status | default('completed') }}"
-  
-  tasks:
-    - name: Check eligibility and provider status
-      debug:
-        msg: "Verified prerequisite steps: Eligibility processed {{ eligibility_success_count }} records, Provider status is {{ provider_enrollment_status }}"
-      
-    - name: Set simulation variables
-      set_fact:
-        claims_to_process: "{{ (eligibility_success_count | int) * 2 }}"
-        processed_claims: 0
-        rejected_claims: 0
-        
-    - name: Retrieve pending claims
-      debug:
-        msg: "Retrieved {{ claims_to_process }} claims for processing"
-      
-    - name: Process claims batch
-      debug:
-        msg: "Processing claim {{ item }}"
-      loop: "{{ range(1, (claims_to_process | int) + 1) | list }}"
-      register: claims_results
-      
-    - name: Simulate successful claims
-      set_fact:
-        processed_claims: "{{ processed_claims | int + 1 }}"
-      loop: "{{ claims_results.results }}"
-      when: 
-        - item is succeeded
-        - (item.item | int) % 5 != 0  # 80% success rate
-        
-    - name: Simulate rejected claims
-      set_fact:
-        rejected_claims: "{{ rejected_claims | int + 1 }}"
-      loop: "{{ claims_results.results }}"
-      when: 
-        - item is succeeded
-        - (item.item | int) % 5 == 0  # 20% rejection rate
-      
-    - name: Submit claims to clearinghouse
-      debug:
-        msg: "Submitting {{ processed_claims }} claims to clearinghouse"
-      
-    - name: Generate rejection reports
-      debug:
-        msg: "Generating reports for {{ rejected_claims }} rejected claims"
-      when: rejected_claims | int > 0
-      
-    - name: Update claims database status
-      debug:
-        msg: "Updating claims database with processing results"
-        
-    - name: Summarize batch results
-      debug:
-        msg: "Claims batch summary: {{ claims_to_process }} total claims, {{ processed_claims }} processed, {{ rejected_claims }} rejected"
-        
-    - name: Set output for workflow
-      set_stats:
-        data:
-          claims_processed_count: "{{ processed_claims }}"
-          claims_rejected_count: "{{ rejected_claims }}"
-          claims_batch_status: "completed"
-        aggregate: yes
-
-
-
-
-
-
-
-
-
+===
 
 
 
@@ -278,16 +173,11 @@
   connection: local
   gather_facts: false
   
-  vars:
-    # These variables could come from previous steps in a workflow
-    system_health_status: "{{ system_health_status | default('healthy') }}"
-    eligibility_status: "{{ eligibility_status | default('completed') }}"
-  
   tasks:
-    - name: Check prerequisites
+    - name: Display available variables
       debug:
-        msg: "Checking prerequisites - System status: {{ system_health_status }}, Eligibility status: {{ eligibility_status }}"
-      
+        msg: "Checking for variables from previous jobs"
+        
     - name: Set simulation variables
       set_fact:
         providers_to_validate: "{{ 20 | random + 10 }}"
@@ -341,108 +231,3 @@
           invalid_npi_count: "{{ invalid_count }}"
           npi_validation_status: "completed"
         aggregate: yes
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
----
-# MAINT-SystemHealthCheck-Hourly.yml
-# This playbook performs hourly system health checks
-
-- name: System Health Check
-  hosts: localhost
-  connection: local
-  gather_facts: true
-  
-  tasks:
-    - name: Check system resources
-      debug:
-        msg: "Checking system resources on {{ ansible_hostname }}"
-      
-    - name: Simulate disk space check
-      set_fact:
-        disk_usage_pct: "{{ 75 | random + 10 }}"
-        
-    - name: Evaluate disk space
-      debug:
-        msg: "Current disk usage is {{ disk_usage_pct }}%"
-        
-    - name: Warn if disk space is high
-      debug:
-        msg: "WARNING: Disk usage is high at {{ disk_usage_pct }}%"
-      when: disk_usage_pct | int > 80
-      
-    - name: Simulate memory usage check
-      set_fact:
-        memory_usage_pct: "{{ 60 | random + 10 }}"
-        
-    - name: Evaluate memory usage
-      debug:
-        msg: "Current memory usage is {{ memory_usage_pct }}%"
-        
-    - name: Warn if memory usage is high
-      debug:
-        msg: "WARNING: Memory usage is high at {{ memory_usage_pct }}%"
-      when: memory_usage_pct | int > 75
-      
-    - name: Simulate CPU load check
-      set_fact:
-        cpu_load: "{{ 2 | random + 1 }}.{{ 99 | random }}"
-        
-    - name: Evaluate CPU load
-      debug:
-        msg: "Current CPU load is {{ cpu_load }}"
-        
-    - name: Check database connectivity
-      debug:
-        msg: "Verifying database connectivity"
-      register: db_check
-      
-    - name: Set health status
-      set_fact:
-        system_healthy: "{{ (disk_usage_pct | int) < 85 and (memory_usage_pct | int) < 80 }}"
-        
-    - name: Report overall health status
-      debug:
-        msg: "System health status: {{ 'HEALTHY' if system_healthy else 'NEEDS ATTENTION' }}"
-        
-    - name: Set output for workflow
-      set_stats:
-        data:
-          system_health_status: "{{ 'healthy' if system_healthy else 'warning' }}"
-          disk_usage: "{{ disk_usage_pct }}"
-          memory_usage: "{{ memory_usage_pct }}"
-          cpu_load: "{{ cpu_load }}"
-        aggregate: yes
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
