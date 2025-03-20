@@ -1,77 +1,53 @@
 ---
-# MAINT-SystemHealthCheck-Hourly.yml
-# This playbook performs hourly system health checks
+# PROVIDER-EnrollmentDaily-Process.yml
+# This playbook processes daily provider enrollment requests
 
-- name: System Health Check
+- name: Process Provider Enrollment Requests
   hosts: localhost
   connection: local
-  gather_facts: true
+  gather_facts: false
   
   tasks:
-    - name: Check system resources
+    - name: Check for new enrollment requests
       debug:
-        msg: "Checking system resources on {{ ansible_hostname }}"
+        msg: "Checking for new provider enrollment requests in the queue"
       
-    - name: Simulate disk space check
+    - name: Set simulation variables
       set_fact:
-        disk_usage_pct: "{{ 75 | random + 10 }}"
+        new_requests_count: "{{ 5 | random + 1 }}"
+        processed_count: 0
         
-    - name: Evaluate disk space
+    - name: Process enrollment requests
       debug:
-        msg: "Current disk usage is {{ disk_usage_pct }}%"
-        
-    - name: Warn if disk space is high
-      debug:
-        msg: "WARNING: Disk usage is high at {{ disk_usage_pct }}%"
-      when: disk_usage_pct | int > 80
+        msg: "Processing provider enrollment request {{ item }}"
+      loop: "{{ range(1, (new_requests_count | int) + 1) | list }}"
+      register: process_result
       
-    - name: Simulate memory usage check
+    - name: Update processed count
       set_fact:
-        memory_usage_pct: "{{ 60 | random + 10 }}"
-        
-    - name: Evaluate memory usage
-      debug:
-        msg: "Current memory usage is {{ memory_usage_pct }}%"
-        
-    - name: Warn if memory usage is high
-      debug:
-        msg: "WARNING: Memory usage is high at {{ memory_usage_pct }}%"
-      when: memory_usage_pct | int > 75
+        processed_count: "{{ processed_count | int + 1 }}"
+      loop: "{{ process_result.results }}"
+      when: item is succeeded
       
-    - name: Simulate CPU load check
-      set_fact:
-        cpu_load: "{{ 2 | random + 1 }}.{{ 99 | random }}"
-        
-    - name: Evaluate CPU load
+    - name: Generate NPI for new providers
       debug:
-        msg: "Current CPU load is {{ cpu_load }}"
-        
-    - name: Check database connectivity
-      debug:
-        msg: "Verifying database connectivity"
-      register: db_check
+        msg: "Generated NPI number for request {{ item }}"
+      loop: "{{ range(1, (new_requests_count | int) + 1) | list }}"
       
-    - name: Set health status
-      set_fact:
-        system_healthy: "{{ (disk_usage_pct | int) < 85 and (memory_usage_pct | int) < 80 }}"
-        
-    - name: Report overall health status
+    - name: Send confirmation emails
       debug:
-        msg: "System health status: {{ 'HEALTHY' if system_healthy else 'NEEDS ATTENTION' }}"
+        msg: "Sending confirmation email for processed enrollments"
+        
+    - name: Summarize results
+      debug:
+        msg: "Provider enrollment summary: {{ new_requests_count }} new requests, {{ processed_count }} successfully processed"
         
     - name: Set output for workflow
       set_stats:
         data:
-          system_health_status: "{{ 'healthy' if system_healthy else 'warning' }}"
-          disk_usage: "{{ disk_usage_pct }}"
-          memory_usage: "{{ memory_usage_pct }}"
-          cpu_load: "{{ cpu_load }}"
+          provider_enrollment_count: "{{ processed_count }}"
+          provider_enrollment_status: "completed"
         aggregate: yes
-
-
-
-
-
 
 
 ---
