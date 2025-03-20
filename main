@@ -231,3 +231,97 @@
           invalid_npi_count: "{{ invalid_count }}"
           npi_validation_status: "completed"
         aggregate: yes
+
+
+
+====
+
+
+---
+# ERROR-NotificationHandler.yml
+# This playbook handles errors from failed jobs in workflows
+
+- name: Handle Workflow Errors
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  
+  tasks:
+    - name: Get error context
+      set_fact:
+        failed_job: "{{ lookup('env', 'ANSIBLE_WORKFLOW_JOB_TEMPLATE_NAME') | default('Unknown job') }}"
+        error_type: "{{ lookup('env', 'ANSIBLE_FAILED_TASK') | default('Unknown error') }}"
+        
+    - name: Display error information
+      debug:
+        msg: "Error detected in workflow: Job '{{ failed_job }}' failed with error '{{ error_type }}'"
+        
+    - name: Determine error severity
+      set_fact:
+        error_severity: >-
+          {% if 'Database' in failed_job %}
+          CRITICAL
+          {% elif 'NPI' in failed_job %}
+          HIGH
+          {% elif 'Claims' in failed_job %}
+          MEDIUM
+          {% else %}
+          LOW
+          {% endif %}
+        
+    - name: Simulate sending email notification
+      debug:
+        msg: "ALERT [{{ error_severity }}]: Job '{{ failed_job }}' failed in the healthcare processing workflow. Immediate attention required."
+        
+    - name: Log error details
+      debug:
+        msg: "Error details would be logged to monitoring system here. Error type: {{ error_type }}"
+        
+    - name: Create error report
+      debug:
+        msg: "Generated error report for operations team with remediation steps"
+        
+    - name: Check if auto-recovery is possible
+      debug:
+        msg: "Checking if automated recovery is possible for this error type"
+        
+    - name: Simulate recovery attempt
+      debug:
+        msg: "Attempted recovery process. Recovery actions would be implemented here for appropriate error types."
+        
+    - name: Set output status
+      set_stats:
+        data:
+          error_handler_status: "completed"
+          error_recovery_attempted: true
+          error_job: "{{ failed_job }}"
+        aggregate: yes
+
+
+
+
+====
+
+
+---
+# TEST-FailureSimulation.yml
+# This playbook intentionally fails for testing error handling
+
+- name: Intentional Failure for Testing
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  
+  tasks:
+    - name: This will succeed
+      debug:
+        msg: "This task succeeds"
+        
+    - name: This will fail intentionally
+      fail:
+        msg: "This is an intentional failure to test error handling"
+      when: true  # Always fail
+        
+    - name: This will never run
+      debug:
+        msg: "This will never run because the previous task failed"
