@@ -20,19 +20,19 @@
     - name: Process enrollment requests
       debug:
         msg: "Processing provider enrollment request {{ item }}"
-      loop: "{{ range(1, new_requests_count + 1) | list }}"
+      loop: "{{ range(1, (new_requests_count | int) + 1) | list }}"
       register: process_result
       
     - name: Update processed count
       set_fact:
-        processed_count: "{{ processed_count + 1 }}"
+        processed_count: "{{ processed_count | int + 1 }}"
       loop: "{{ process_result.results }}"
       when: item is succeeded
       
     - name: Generate NPI for new providers
       debug:
         msg: "Generated NPI number for request {{ item }}"
-      loop: "{{ range(1, new_requests_count + 1) | list }}"
+      loop: "{{ range(1, (new_requests_count | int) + 1) | list }}"
       
     - name: Send confirmation emails
       debug:
@@ -48,7 +48,6 @@
           provider_enrollment_count: "{{ processed_count }}"
           provider_enrollment_status: "completed"
         aggregate: yes
-
 
 
 
