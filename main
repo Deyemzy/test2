@@ -1,74 +1,111 @@
 ---
-# T-MSIS-Eligible-File-Extract.yml
-# This playbook extracts eligibility data for T-MSIS reporting
+# PROVIDER-NPPES-File-Load.yml
+# This playbook loads and processes NPPES provider data files
 
-- name: T-MSIS Eligible File Extract
+- name: Provider NPPES File Load
   hosts: localhost
   connection: local
   gather_facts: false
   
   tasks:
-    - name: Check for pending eligibility extract
+    - name: Check for new NPPES file
       debug:
-        msg: "Initiating T-MSIS eligible file extract process"
+        msg: "Checking for new NPPES file in download directory"
       
     - name: Set simulation variables
       set_fact:
-        extract_date: "{{ '%Y-%m-%d' | strftime }}"
-        records_to_extract: "{{ 15000 | random + 5000 }}"
-        extraction_directory: "/data/tmsis/eligibility/{{ '%Y%m%d' | strftime }}"
+        nppes_file_date: "{{ '%Y_%m' | strftime }}"
+        nppes_file_size_mb: "{{ 600 | random + 200 }}"
+        extraction_directory: "/data/provider/nppes/{{ '%Y%m' | strftime }}"
+        providers_to_process: "{{ 500000 | random + 1000000 }}"
         
-    - name: Create extraction directory
+    - name: Create processing directory
       debug:
         msg: "Creating directory {{ extraction_directory }}"
         
-    - name: Connect to eligibility data source
+    - name: Download NPPES file
       debug:
-        msg: "Connecting to Eligibility database"
-      register: db_connection
+        msg: "Downloading NPPES file from CMS.gov (size: {{ nppes_file_size_mb }}MB)"
+      register: download_result
         
-    - name: Extract eligibility records
+    - name: Verify file integrity
       debug:
-        msg: "Extracting {{ records_to_extract }} eligibility records for T-MSIS reporting"
+        msg: "Verifying NPPES file integrity with checksum"
+      register: integrity_check
+        
+    - name: Extract NPPES file
+      debug:
+        msg: "Extracting NPPES file containing {{ providers_to_process }} provider records"
       register: extract_result
         
-    - name: Process age bands and demographics
+    - name: Process taxonomy codes
       debug:
-        msg: "Processing demographic categorization for CMS reporting"
+        msg: "Processing provider taxonomy codes"
       
-    - name: Generate data quality metrics
+    - name: Process provider addresses
+      debug:
+        msg: "Normalizing and geocoding provider addresses"
+      register: address_processing
+        
+    - name: Generate provider metrics
       set_fact:
-        data_quality_score: "{{ 85 | random + 10 }}"
-        missing_data_pct: "{{ 5 | random }}.{{ 99 | random }}"
+        active_providers_count: "{{ (providers_to_process | int * 0.92) | int }}"
+        deactivated_providers_count: "{{ (providers_to_process | int * 0.08) | int }}"
+        new_providers_count: "{{ (providers_to_process | int * 0.05) | int }}"
+        taxonomy_groups: "{{ 300 | random + 50 }}"
         
-    - name: Apply CMS data transformation rules
+    - name: Transform data for local system
       debug:
-        msg: "Applying T-MSIS transformation rules version 3.5"
-        
-    - name: Generate T-MSIS compliant file
+        msg: "Transforming NPPES data for loading into provider management system"
+      
+    - name: Load data to provider database
       debug:
-        msg: "Generating T-MSIS eligible file in {{ extraction_directory }}/TMSIS_ELG_{{ '%Y%m%d' | strftime }}.csv"
+        msg: "Loading {{ providers_to_process }} provider records to database"
+      register: db_load
         
-    - name: Calculate file metrics
+    - name: Create indexes
+      debug:
+        msg: "Creating database indexes for optimal query performance"
+      
+    - name: Run data quality checks
+      debug:
+        msg: "Running data quality validations on loaded NPPES data"
+      register: quality_checks
+      
+    - name: Set quality metrics
       set_fact:
-        file_size_mb: "{{ (records_to_extract | int / 1000 * 2) | round(2) }}"
-        extract_duration_sec: "{{ 120 | random + 60 }}"
+        data_quality_score: "{{ 95 | random + 3 }}"
+        duplicate_npi_count: "{{ (providers_to_process | int * 0.001) | int }}"
+        invalid_address_count: "{{ (providers_to_process | int * 0.02) | int }}"
         
-    - name: Generate extraction report
+    - name: Generate processing report
       debug:
-        msg: "T-MSIS Eligible Extraction Report: Extracted {{ records_to_extract }} records, File size {{ file_size_mb }}MB, Duration {{ extract_duration_sec }} seconds, Data quality score {{ data_quality_score }}%"
-        
-    - name: Add to extract history
-      debug:
-        msg: "Adding extract to history log - Extract #{{ 1000 | random + 5000 }}"
-        
+        msg: |
+          NPPES FILE PROCESSING REPORT
+          ===========================
+          File: NPPES_Data_Dissemination_{{ nppes_file_date }}.zip
+          Size: {{ nppes_file_size_mb }}MB
+          Records Processed: {{ providers_to_process }}
+          Active Providers: {{ active_providers_count }}
+          Deactivated Providers: {{ deactivated_providers_count }}
+          New Providers: {{ new_providers_count }}
+          Taxonomy Groups: {{ taxonomy_groups }}
+          
+          Data Quality:
+          - Quality Score: {{ data_quality_score }}%
+          - Duplicate NPIs: {{ duplicate_npi_count }}
+          - Invalid Addresses: {{ invalid_address_count }}
+          
+          Processing Duration: {{ 250 | random + 150 }} seconds
+          
     - name: Set output for workflow
       set_stats:
         data:
-          tmsis_eligible_extracted_count: "{{ records_to_extract }}"
-          tmsis_eligible_quality_score: "{{ data_quality_score }}"
-          tmsis_eligible_file_path: "{{ extraction_directory }}/TMSIS_ELG_{{ '%Y%m%d' | strftime }}.csv"
-          tmsis_eligible_status: "completed"
+          nppes_processed_count: "{{ providers_to_process }}"
+          nppes_active_count: "{{ active_providers_count }}"
+          nppes_new_count: "{{ new_providers_count }}"
+          nppes_quality_score: "{{ data_quality_score }}"
+          nppes_status: "completed"
         aggregate: yes
 
 
@@ -76,318 +113,270 @@
 ===
 
 
----
-# T-MSIS-Provider-File-Extract.yml
-# This playbook extracts provider data for T-MSIS reporting
 
-- name: T-MSIS Provider File Extract
+---
+# PROVIDER-Validation-Process.yml
+# This playbook validates provider data against various standards
+
+- name: Provider Validation Process
   hosts: localhost
   connection: local
   gather_facts: false
   
   vars:
     # Get variables from previous job
-    tmsis_eligible_extracted_count: "{{ hostvars.localhost.tmsis_eligible_extracted_count | default(10000) }}"
-    tmsis_eligible_status: "{{ hostvars.localhost.tmsis_eligible_status | default('completed') }}"
+    nppes_processed_count: "{{ hostvars.localhost.nppes_processed_count | default(1500000) }}"
+    nppes_active_count: "{{ hostvars.localhost.nppes_active_count | default(1380000) }}"
+    nppes_status: "{{ hostvars.localhost.nppes_status | default('completed') }}"
   
   tasks:
-    - name: Check previous extract status
+    - name: Check NPPES load status
       debug:
-        msg: "Verifying Eligible extract status: {{ tmsis_eligible_status }} with {{ tmsis_eligible_extracted_count }} eligible records processed"
+        msg: "Verifying NPPES load status: {{ nppes_status }} with {{ nppes_active_count }} active providers"
         
     - name: Set simulation variables
       set_fact:
-        extract_date: "{{ '%Y-%m-%d' | strftime }}"
-        # Provider count is typically about 20% of eligible count
-        records_to_extract: "{{ (tmsis_eligible_extracted_count | int * 0.2) | int }}"
-        extraction_directory: "/data/tmsis/provider/{{ '%Y%m%d' | strftime }}"
+        validation_batch_size: 10000
+        total_batches: "{{ (nppes_active_count | int / 10000) | int }}"
+        total_providers: "{{ nppes_active_count | int }}"
+        output_directory: "/data/provider/validation/{{ '%Y%m%d' | strftime }}"
         
-    - name: Create extraction directory
+    - name: Create output directory
       debug:
-        msg: "Creating directory {{ extraction_directory }}"
+        msg: "Creating directory {{ output_directory }}"
         
-    - name: Connect to provider data source
-      debug:
-        msg: "Connecting to Provider Management System"
-      register: db_connection
-        
-    - name: Apply taxonomy filtering
-      debug:
-        msg: "Applying CMS provider taxonomy filters for T-MSIS compliance"
-        
-    - name: Extract provider records
-      debug:
-        msg: "Extracting {{ records_to_extract }} provider records for T-MSIS reporting"
-      register: extract_result
-        
-    - name: Perform NPI validation
-      debug:
-        msg: "Validating NPI numbers against NPPES database"
-      register: npi_validation
-      
-    - name: Process provider specialties
-      debug:
-        msg: "Categorizing providers by specialty codes for CMS reporting"
-      
-    - name: Generate data quality metrics
+    - name: Initialize validation metrics
       set_fact:
-        data_quality_score: "{{ 80 | random + 15 }}"
-        missing_taxonomy_pct: "{{ 3 | random }}.{{ 99 | random }}"
-        invalid_npi_count: "{{ records_to_extract | int * 0.05 | int }}"
+        validated_providers: 0
+        validation_errors: 0
+        npi_validation_errors: 0
+        address_validation_errors: 0
+        taxonomy_validation_errors: 0
+        license_validation_errors: 0
+        high_risk_providers: 0
         
-    - name: Apply CMS data transformation rules
+    - name: Connect to validation services
       debug:
-        msg: "Applying T-MSIS provider transformation rules version 3.5"
+        msg: "Connecting to validation services: NPI Registry, Address Validation, License Verification"
+      register: services_connection
         
-    - name: Generate T-MSIS compliant file
+    - name: Process validation batches
       debug:
-        msg: "Generating T-MSIS provider file in {{ extraction_directory }}/TMSIS_PRV_{{ '%Y%m%d' | strftime }}.csv"
+        msg: "Processing {{ total_batches }} validation batches ({{ validation_batch_size }} providers per batch)"
         
-    - name: Calculate file metrics
+    - name: Run NPI registry validation
+      debug:
+        msg: "Validating provider NPIs against official CMS NPI registry"
       set_fact:
-        file_size_mb: "{{ (records_to_extract | int / 500 * 2) | round(2) }}"
-        extract_duration_sec: "{{ 90 | random + 30 }}"
+        npi_validation_errors: "{{ (total_providers | int * 0.008) | int }}"
         
-    - name: Generate extraction report
+    - name: Run address validation
       debug:
-        msg: "T-MSIS Provider Extraction Report: Extracted {{ records_to_extract }} records, File size {{ file_size_mb }}MB, Duration {{ extract_duration_sec }} seconds, Data quality score {{ data_quality_score }}%, Invalid NPIs {{ invalid_npi_count }}"
-        
-    - name: Add to extract history
-      debug:
-        msg: "Adding extract to history log - Extract #{{ 1000 | random + 5000 }}"
-        
-    - name: Set output for workflow
-      set_stats:
-        data:
-          tmsis_provider_extracted_count: "{{ records_to_extract }}"
-          tmsis_provider_quality_score: "{{ data_quality_score }}"
-          tmsis_provider_file_path: "{{ extraction_directory }}/TMSIS_PRV_{{ '%Y%m%d' | strftime }}.csv"
-          tmsis_provider_status: "completed"
-        aggregate: yes
-
-
-
-===
-
-
----
-# T-MSIS-In-Patient-Claims-File-Extract.yml
-# This playbook extracts in-patient claims data for T-MSIS reporting
-
-- name: T-MSIS In-Patient Claims File Extract
-  hosts: localhost
-  connection: local
-  gather_facts: false
-  
-  vars:
-    # Get variables from previous jobs
-    tmsis_eligible_extracted_count: "{{ hostvars.localhost.tmsis_eligible_extracted_count | default(10000) }}"
-    tmsis_provider_extracted_count: "{{ hostvars.localhost.tmsis_provider_extracted_count | default(2000) }}"
-    tmsis_provider_status: "{{ hostvars.localhost.tmsis_provider_status | default('completed') }}"
-  
-  tasks:
-    - name: Check previous extract status
-      debug:
-        msg: "Verifying Provider extract status: {{ tmsis_provider_status }} with {{ tmsis_provider_extracted_count }} provider records processed"
-        
-    - name: Set simulation variables
+        msg: "Validating provider addresses against USPS database"
       set_fact:
-        extract_date: "{{ '%Y-%m-%d' | strftime }}"
-        # In-patient claims are approximately 10% of eligible count
-        records_to_extract: "{{ (tmsis_eligible_extracted_count | int * 0.1) | int }}"
-        extraction_directory: "/data/tmsis/claims/inpatient/{{ '%Y%m%d' | strftime }}"
+        address_validation_errors: "{{ (total_providers | int * 0.025) | int }}"
         
-    - name: Create extraction directory
+    - name: Verify provider licenses
       debug:
-        msg: "Creating directory {{ extraction_directory }}"
-        
-    - name: Connect to claims data source
-      debug:
-        msg: "Connecting to Claims Processing System"
-      register: db_connection
-        
-    - name: Apply date range filtering
-      debug:
-        msg: "Filtering in-patient claims for date range {{ '%Y-%m-01' | strftime }} to {{ '%Y-%m-%d' | strftime }}"
-        
-    - name: Extract in-patient claims records
-      debug:
-        msg: "Extracting {{ records_to_extract }} in-patient claims records for T-MSIS reporting"
-      register: extract_result
-        
-    - name: Process diagnosis codes
-      debug:
-        msg: "Processing ICD-10 diagnosis codes for compliance"
-      register: diagnosis_processing
-      
-    - name: Process procedure codes
-      debug:
-        msg: "Processing procedure codes according to HCPCS/CPT standards"
-        
-    - name: Calculate claim metrics
+        msg: "Verifying provider licenses against state licensing boards"
       set_fact:
-        total_claim_amount: "{{ (records_to_extract | int * 2500) | int }}"
-        avg_claim_amount: "{{ 2500 | int }}"
-        top_diagnosis: "J18.9 - Pneumonia, unspecified organism"
+        license_validation_errors: "{{ (total_providers | int * 0.012) | int }}"
         
-    - name: Generate data quality metrics
+    - name: Check for sanctions and exclusions
+      debug:
+        msg: "Checking providers against OIG exclusion list and NPDB"
       set_fact:
-        data_quality_score: "{{ 85 | random + 10 }}"
-        missing_diagnosis_pct: "{{ 2 | random }}.{{ 99 | random }}"
-        duplicate_claim_count: "{{ (records_to_extract | int * 0.02) | int }}"
+        high_risk_providers: "{{ (total_providers | int * 0.002) | int }}"
         
-    - name: Apply CMS data transformation rules
+    - name: Validate taxonomy codes
       debug:
-        msg: "Applying T-MSIS in-patient claims transformation rules version 3.5"
-        
-    - name: Generate T-MSIS compliant file
-      debug:
-        msg: "Generating T-MSIS in-patient claims file in {{ extraction_directory }}/TMSIS_IP_{{ '%Y%m%d' | strftime }}.csv"
-        
-    - name: Calculate file metrics
+        msg: "Validating provider taxonomy codes against latest NUCC code set"
       set_fact:
-        file_size_mb: "{{ (records_to_extract | int / 100) | round(2) }}"
-        extract_duration_sec: "{{ 150 | random + 60 }}"
+        taxonomy_validation_errors: "{{ (total_providers | int * 0.015) | int }}"
         
-    - name: Generate extraction report
-      debug:
-        msg: "T-MSIS In-Patient Claims Extraction Report: Extracted {{ records_to_extract }} records, Total claim amount ${{ total_claim_amount }}, File size {{ file_size_mb }}MB, Duration {{ extract_duration_sec }} seconds, Data quality score {{ data_quality_score }}%"
-        
-    - name: Create CMS submission manifest
-      debug:
-        msg: "Creating CMS submission manifest for in-patient claims batch"
-        
-    - name: Set output for workflow
-      set_stats:
-        data:
-          tmsis_inpatient_extracted_count: "{{ records_to_extract }}"
-          tmsis_inpatient_quality_score: "{{ data_quality_score }}"
-          tmsis_inpatient_file_path: "{{ extraction_directory }}/TMSIS_IP_{{ '%Y%m%d' | strftime }}.csv"
-          tmsis_inpatient_status: "completed"
-          tmsis_inpatient_total_amount: "{{ total_claim_amount }}"
-        aggregate: yes
-
-
-
-===
-
----
-# T-MSIS-Long-Term-Care-Claims-File-Extract.yml
-# This playbook extracts long-term care claims data for T-MSIS reporting
-
-- name: T-MSIS Long-Term Care Claims File Extract
-  hosts: localhost
-  connection: local
-  gather_facts: false
-  
-  vars:
-    # Get variables from previous jobs
-    tmsis_eligible_extracted_count: "{{ hostvars.localhost.tmsis_eligible_extracted_count | default(10000) }}"
-    tmsis_inpatient_extracted_count: "{{ hostvars.localhost.tmsis_inpatient_extracted_count | default(1000) }}"
-    tmsis_inpatient_status: "{{ hostvars.localhost.tmsis_inpatient_status | default('completed') }}"
-  
-  tasks:
-    - name: Check previous extract status
-      debug:
-        msg: "Verifying In-Patient extract status: {{ tmsis_inpatient_status }} with {{ tmsis_inpatient_extracted_count }} in-patient claims processed"
-        
-    - name: Set simulation variables
+    - name: Calculate total errors
       set_fact:
-        extract_date: "{{ '%Y-%m-%d' | strftime }}"
-        # Long-term care claims are approximately 5% of eligible count
-        records_to_extract: "{{ (tmsis_eligible_extracted_count | int * 0.05) | int }}"
-        extraction_directory: "/data/tmsis/claims/ltc/{{ '%Y%m%d' | strftime }}"
+        validation_errors: "{{ (npi_validation_errors | int) + (address_validation_errors | int) + (license_validation_errors | int) + (taxonomy_validation_errors | int) }}"
+        validated_providers: "{{ total_providers | int }}"
         
-    - name: Create extraction directory
+    - name: Create error reports
       debug:
-        msg: "Creating directory {{ extraction_directory }}"
+        msg: "Creating detailed error reports for each validation type"
         
-    - name: Connect to long-term care data source
+    - name: Flag high-risk providers
       debug:
-        msg: "Connecting to Long-Term Care Processing System"
-      register: db_connection
+        msg: "Flagging {{ high_risk_providers }} high-risk providers for review"
         
-    - name: Apply date range filtering
-      debug:
-        msg: "Filtering long-term care claims for date range {{ '%Y-%m-01' | strftime }} to {{ '%Y-%m-%d' | strftime }}"
-        
-    - name: Extract long-term care claims records
-      debug:
-        msg: "Extracting {{ records_to_extract }} long-term care claims records for T-MSIS reporting"
-      register: extract_result
-        
-    - name: Process facility information
-      debug:
-        msg: "Processing facility identification and certification data"
-      register: facility_processing
-      
-    - name: Process level of care codes
-      debug:
-        msg: "Processing level of care codes according to CMS standards"
-        
-    - name: Calculate claim metrics
-      set_fact:
-        total_claim_amount: "{{ (records_to_extract | int * 8500) | int }}"
-        avg_claim_amount: "{{ 8500 | int }}"
-        avg_length_of_stay_days: "{{ 180 | random + 20 }}"
-        
-    - name: Generate data quality metrics
-      set_fact:
-        data_quality_score: "{{ 90 | random + 7 }}"
-        missing_facility_data_pct: "{{ 1 | random }}.{{ 99 | random }}"
-        
-    - name: Apply CMS data transformation rules
-      debug:
-        msg: "Applying T-MSIS long-term care claims transformation rules version 3.5"
-        
-    - name: Generate T-MSIS compliant file
-      debug:
-        msg: "Generating T-MSIS long-term care claims file in {{ extraction_directory }}/TMSIS_LTC_{{ '%Y%m%d' | strftime }}.csv"
-        
-    - name: Calculate file metrics
-      set_fact:
-        file_size_mb: "{{ (records_to_extract | int / 80) | round(2) }}"
-        extract_duration_sec: "{{ 120 | random + 40 }}"
-        
-    - name: Generate extraction report
-      debug:
-        msg: "T-MSIS Long-Term Care Claims Extraction Report: Extracted {{ records_to_extract }} records, Total claim amount ${{ total_claim_amount }}, Avg stay {{ avg_length_of_stay_days }} days, File size {{ file_size_mb }}MB, Duration {{ extract_duration_sec }} seconds, Data quality score {{ data_quality_score }}%"
-        
-    - name: Create CMS submission manifest
-      debug:
-        msg: "Creating CMS submission manifest for long-term care claims batch"
-        
-    - name: Generate CMS compliance dashboard data
-      debug:
-        msg: "Generating data for CMS compliance dashboard - Overall submission compliance score: {{ data_quality_score }}%"
-        
-    - name: Set output for workflow
-      set_stats:
-        data:
-          tmsis_ltc_extracted_count: "{{ records_to_extract }}"
-          tmsis_ltc_quality_score: "{{ data_quality_score }}"
-          tmsis_ltc_file_path: "{{ extraction_directory }}/TMSIS_LTC_{{ '%Y%m%d' | strftime }}.csv"
-          tmsis_ltc_status: "completed"
-          tmsis_ltc_total_amount: "{{ total_claim_amount }}"
-          tmsis_total_records: "{{ (tmsis_eligible_extracted_count | int) + (tmsis_provider_extracted_count | default(2000) | int) + (tmsis_inpatient_extracted_count | int) + (records_to_extract | int) }}"
-          tmsis_final_quality_score: "{{ ((tmsis_eligible_quality_score | default(90) | int) + (tmsis_provider_quality_score | default(90) | int) + (tmsis_inpatient_quality_score | default(90) | int) + (data_quality_score | int)) / 4 }}"
-        aggregate: yes
-        
-    - name: Generate T-MSIS final report
+    - name: Generate validation summary
       debug:
         msg: |
-          ================================================
-                    T-MSIS EXTRACTION COMPLETE
-          ================================================
-          Total Records Processed: {{ (tmsis_eligible_extracted_count | int) + (tmsis_provider_extracted_count | default(2000) | int) + (tmsis_inpatient_extracted_count | int) + (records_to_extract | int) }}
-          Overall Data Quality Score: {{ ((tmsis_eligible_quality_score | default(90) | int) + (tmsis_provider_quality_score | default(90) | int) + (tmsis_inpatient_quality_score | default(90) | int) + (data_quality_score | int)) / 4 }}%
-          Total Claims Amount: ${{ (tmsis_inpatient_total_amount | default(0) | int) + (total_claim_amount | int) }}
+          PROVIDER VALIDATION SUMMARY
+          ===========================
+          Total Providers Validated: {{ validated_providers }}
+          Total Validation Errors: {{ validation_errors }} ({{ (validation_errors | int * 100 / validated_providers | int) | round(2) }}%)
           
-          Files Generated:
-          - Eligible Members: {{ tmsis_eligible_extracted_count | default(0) }} records
-          - Providers: {{ tmsis_provider_extracted_count | default(0) }} records
-          - In-Patient Claims: {{ tmsis_inpatient_extracted_count | default(0) }} records
-          - Long-Term Care Claims: {{ records_to_extract }} records
+          Error Breakdown:
+          - NPI Validation Errors: {{ npi_validation_errors }} ({{ (npi_validation_errors | int * 100 / validated_providers | int) | round(2) }}%)
+          - Address Validation Errors: {{ address_validation_errors }} ({{ (address_validation_errors | int * 100 / validated_providers | int) | round(2) }}%)
+          - License Validation Errors: {{ license_validation_errors }} ({{ (license_validation_errors | int * 100 / validated_providers | int) | round(2) }}%)
+          - Taxonomy Validation Errors: {{ taxonomy_validation_errors }} ({{ (taxonomy_validation_errors | int * 100 / validated_providers | int) | round(2) }}%)
           
-          All files are ready for secure transmission to CMS.
-          ================================================
+          High-Risk Providers Identified: {{ high_risk_providers }}
+          
+          Validation completed in {{ (total_batches | int * 5) | int }} seconds
+        
+    - name: Update provider database flags
+      debug:
+        msg: "Updating validation flags in provider database for {{ validation_errors }} providers with issues"
+        
+    - name: Set output for workflow
+      set_stats:
+        data:
+          provider_validated_count: "{{ validated_providers }}"
+          provider_error_count: "{{ validation_errors }}"
+          provider_high_risk_count: "{{ high_risk_providers }}"
+          provider_validation_status: "completed"
+        aggregate: yes
+
+
+
+===
+
+
+---
+# PROVIDER-Enrollment-Completion.yml
+# This playbook processes provider enrollment completions
+
+- name: Provider Enrollment Completion
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  
+  vars:
+    # Get variables from previous job
+    provider_validated_count: "{{ hostvars.localhost.provider_validated_count | default(1380000) }}"
+    provider_error_count: "{{ hostvars.localhost.provider_error_count | default(68000) }}"
+    provider_high_risk_count: "{{ hostvars.localhost.provider_high_risk_count | default(2800) }}"
+    provider_validation_status: "{{ hostvars.localhost.provider_validation_status | default('completed') }}"
+  
+  tasks:
+    - name: Check validation status
+      debug:
+        msg: "Verifying provider validation status: {{ provider_validation_status }} with {{ provider_validated_count }} validated providers and {{ provider_error_count }} errors found"
+        
+    - name: Set simulation variables
+      set_fact:
+        eligible_for_enrollment: "{{ (provider_validated_count | int) - (provider_error_count | int) - (provider_high_risk_count | int) }}"
+        enrollment_processing_date: "{{ '%Y-%m-%d' | strftime }}"
+        output_directory: "/data/provider/enrollment/{{ '%Y%m%d' | strftime }}"
+        
+    - name: Create output directory
+      debug:
+        msg: "Creating directory {{ output_directory }}"
+        
+    - name: Initialize enrollment metrics
+      set_fact:
+        completed_enrollments: 0
+        pending_enrollments: 0
+        rejected_enrollments: 0
+        eligible_providers: "{{ eligible_for_enrollment | int }}"
+        
+    - name: Connect to enrollment system
+      debug:
+        msg: "Connecting to Provider Enrollment Management System"
+      register: enrollment_system
+        
+    - name: Process eligible providers
+      debug:
+        msg: "Processing enrollment completion for {{ eligible_providers }} eligible providers"
+        
+    - name: Apply enrollment rules
+      debug:
+        msg: "Applying state-specific enrollment rules and requirements"
+      
+    - name: Process credentialing data
+      debug:
+        msg: "Processing provider credentialing data"
+        
+    - name: Verify network adequacy impacts
+      debug:
+        msg: "Calculating network adequacy metrics with new providers"
+      
+    - name: Calculate enrollment outcomes
+      set_fact:
+        completed_enrollments: "{{ (eligible_providers | int * 0.85) | int }}"
+        pending_enrollments: "{{ (eligible_providers | int * 0.12) | int }}"
+        rejected_enrollments: "{{ (eligible_providers | int * 0.03) | int }}"
+        
+    - name: Calculate network statistics
+      set_fact:
+        new_service_areas: "{{ 25 | random + 10 }}"
+        improved_coverage_pct: "{{ 12 | random + 3 }}"
+        specialist_coverage_pct: "{{ 8 | random + 5 }}"
+        
+    - name: Generate provider directories
+      debug:
+        msg: "Generating updated provider directories with {{ completed_enrollments }} newly enrolled providers"
+        
+    - name: Send notification letters
+      debug:
+        msg: "Preparing notification letters for {{ completed_enrollments }} approved providers"
+        
+    - name: Update provider portal
+      debug:
+        msg: "Updating provider portal with new enrollment statuses"
+        
+    - name: Generate enrollment completion report
+      debug:
+        msg: |
+          PROVIDER ENROLLMENT COMPLETION REPORT
+          =====================================
+          Date: {{ enrollment_processing_date }}
+          
+          Enrollment Summary:
+          - Eligible for Enrollment: {{ eligible_providers }}
+          - Successfully Completed: {{ completed_enrollments }} ({{ (completed_enrollments | int * 100 / eligible_providers | int) | round(2) }}%)
+          - Pending Additional Info: {{ pending_enrollments }} ({{ (pending_enrollments | int * 100 / eligible_providers | int) | round(2) }}%)
+          - Rejected: {{ rejected_enrollments }} ({{ (rejected_enrollments | int * 100 / eligible_providers | int) | round(2) }}%)
+          
+          Network Impact:
+          - New Service Areas Covered: {{ new_service_areas }}
+          - Overall Coverage Improvement: {{ improved_coverage_pct }}%
+          - Specialist Coverage Improvement: {{ specialist_coverage_pct }}%
+          
+          Provider directories have been updated.
+          Notification letters have been prepared for distribution.
+          Provider portal has been updated with current enrollment statuses.
+        
+    - name: Create network adequacy visualization data
+      debug:
+        msg: "Generating data for network adequacy visualization dashboard"
+        
+    - name: Set output for workflow
+      set_stats:
+        data:
+          provider_enrollment_completed: "{{ completed_enrollments }}"
+          provider_enrollment_pending: "{{ pending_enrollments }}"
+          provider_enrollment_rejected: "{{ rejected_enrollments }}"
+          provider_network_new_areas: "{{ new_service_areas }}"
+          provider_enrollment_status: "completed"
+        aggregate: yes
+        
+    - name: Generate impressive visual report data
+      debug:
+        msg: |
+          ✨ PROVIDER NETWORK ENHANCEMENT COMPLETE ✨
+          
+          🏆 {{ completed_enrollments }} new providers successfully enrolled
+          
+          📊 Network Improvements:
+          - {{ new_service_areas }} new service areas now covered
+          - {{ improved_coverage_pct }}% overall coverage improvement
+          - {{ specialist_coverage_pct }}% increase in specialist availability
+          
+          📱 Provider Portal Updated
+          📬 Notification Letters Prepared
+          📋 Directories Refreshed
+          
+          🔍 Full details available in the Provider Enrollment Dashboard
+
