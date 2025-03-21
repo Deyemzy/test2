@@ -40,24 +40,32 @@
     - name: Process income verification data
       debug:
         msg: "Processing income verification updates"
+        
+    - name: Set income updates count
       set_fact:
         income_updates: "{{ (total_records | int * 0.35) | int }}"
         
     - name: Process address changes
       debug:
         msg: "Processing member address changes"
+        
+    - name: Set address updates count
       set_fact:
         address_updates: "{{ (total_records | int * 0.28) | int }}"
         
     - name: Process household composition changes
       debug:
         msg: "Processing household composition changes"
+        
+    - name: Set household updates count
       set_fact:
         household_updates: "{{ (total_records | int * 0.15) | int }}"
         
     - name: Process demographic updates
       debug:
         msg: "Processing demographic information updates"
+        
+    - name: Set demographic updates count
       set_fact:
         demographic_updates: "{{ (total_records | int * 0.22) | int }}"
         
@@ -123,7 +131,10 @@
 
 
 
-====
+
+======
+
+
 
 
 ---
@@ -164,36 +175,48 @@
     - name: Process vaccination records
       debug:
         msg: "Processing vaccination records for eligible children"
+        
+    - name: Set vaccination updates count
       set_fact:
         vaccination_updates: "{{ (total_children | int * 0.25) | int }}"
         
     - name: Process developmental screening records
       debug:
         msg: "Processing developmental screening records"
+        
+    - name: Set screening updates count
       set_fact:
         screening_updates: "{{ (total_children | int * 0.18) | int }}"
         
     - name: Process well-child visit records
       debug:
         msg: "Processing well-child visit records"
+        
+    - name: Set well-child updates count
       set_fact:
         wellchild_updates: "{{ (total_children | int * 0.22) | int }}"
         
     - name: Process dental visit records
       debug:
         msg: "Processing dental visit records"
+        
+    - name: Set dental updates count
       set_fact:
         dental_updates: "{{ (total_children | int * 0.15) | int }}"
         
     - name: Process vision screening records
       debug:
         msg: "Processing vision screening records"
+        
+    - name: Set vision updates count
       set_fact:
         vision_updates: "{{ (total_children | int * 0.12) | int }}"
         
     - name: Process hearing screening records
       debug:
         msg: "Processing hearing screening records"
+        
+    - name: Set hearing updates count
       set_fact:
         hearing_updates: "{{ (total_children | int * 0.10) | int }}"
         
@@ -206,6 +229,10 @@
         msg: "Updating EPSDT tracking database with {{ total_epsdt_updates }} new service records"
       
     - name: Generate compliance metrics
+      debug:
+        msg: "Generating compliance metrics for EPSDT services"
+        
+    - name: Set compliance metrics
       set_fact:
         compliance_rate: "{{ 75 | random + 15 }}"
         due_for_services: "{{ (total_children | int - total_epsdt_updates | int) }}"
@@ -377,8 +404,6 @@
     - name: Prepare denial reasons report
       debug:
         msg: "Analyzing denial reasons for {{ denied_count }} denied cases"
-        
-    - name: Calculate denial reasons
       set_fact:
         income_denials: "{{ (denied_count | int * 0.45) | int }}"
         residency_denials: "{{ (denied_count | int * 0.15) | int }}"
