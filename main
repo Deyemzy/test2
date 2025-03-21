@@ -1,357 +1,393 @@
 ---
-# CMS-ClaimsBatch-Daily.yml
-# This playbook processes the daily claims batch for CMS
+# T-MSIS-Eligible-File-Extract.yml
+# This playbook extracts eligibility data for T-MSIS reporting
 
-- name: Process CMS Claims Batch
+- name: T-MSIS Eligible File Extract
   hosts: localhost
   connection: local
   gather_facts: false
   
   tasks:
-    - name: Display available variables
+    - name: Check for pending eligibility extract
       debug:
-        msg: "Displaying available variables from hostvars"
-      
-    - name: Check for previous job variables
-      debug:
-        var: hostvars
-      
-    - name: Set simulation variables with fallbacks
-      set_fact:
-        eligibility_success_count: "{{ hostvars.localhost.eligibility_success_count | default(10) }}"
-        npi_validation_status: "{{ hostvars.localhost.npi_validation_status | default('completed') }}"
-        
-    - name: Check eligibility and provider status
-      debug:
-        msg: "Verified prerequisite steps: Eligibility processed {{ eligibility_success_count }} records, NPI validation status is {{ npi_validation_status }}"
-      
-    - name: Set processing variables
-      set_fact:
-        claims_to_process: "{{ (eligibility_success_count | int) * 2 }}"
-        processed_claims: 0
-        rejected_claims: 0
-        
-    - name: Retrieve pending claims
-      debug:
-        msg: "Retrieved {{ claims_to_process }} claims for processing"
-      
-    - name: Process claims batch
-      debug:
-        msg: "Processing claim {{ item }}"
-      loop: "{{ range(1, (claims_to_process | int) + 1) | list }}"
-      register: claims_results
-      
-    - name: Simulate successful claims
-      set_fact:
-        processed_claims: "{{ processed_claims | int + 1 }}"
-      loop: "{{ claims_results.results }}"
-      when: 
-        - item is succeeded
-        - (item.item | int) % 5 != 0  # 80% success rate
-        
-    - name: Simulate rejected claims
-      set_fact:
-        rejected_claims: "{{ rejected_claims | int + 1 }}"
-      loop: "{{ claims_results.results }}"
-      when: 
-        - item is succeeded
-        - (item.item | int) % 5 == 0  # 20% rejection rate
-      
-    - name: Submit claims to clearinghouse
-      debug:
-        msg: "Submitting {{ processed_claims }} claims to clearinghouse"
-      
-    - name: Generate rejection reports
-      debug:
-        msg: "Generating reports for {{ rejected_claims }} rejected claims"
-      when: rejected_claims | int > 0
-      
-    - name: Update claims database status
-      debug:
-        msg: "Updating claims database with processing results"
-        
-    - name: Summarize batch results
-      debug:
-        msg: "Claims batch summary: {{ claims_to_process }} total claims, {{ processed_claims }} processed, {{ rejected_claims }} rejected"
-        
-    - name: Set output for workflow
-      set_stats:
-        data:
-          claims_processed_count: "{{ processed_claims }}"
-          claims_rejected_count: "{{ rejected_claims }}"
-          claims_batch_status: "completed"
-        aggregate: yes
-
-
-
-
-
-====
-
-
-
-
----
-# ELIG-DeterminationCycle-Daily.yml
-# This playbook runs the daily eligibility determination cycle
-
-- name: Run Eligibility Determination Cycle
-  hosts: localhost
-  connection: local
-  gather_facts: false
-  
-  tasks:
-    - name: Check for pending eligibility determinations
-      debug:
-        msg: "Checking for pending eligibility determinations"
+        msg: "Initiating T-MSIS eligible file extract process"
       
     - name: Set simulation variables
       set_fact:
-        pending_determinations: "{{ 15 | random + 5 }}"
-        successful_determinations: 0
-        failed_determinations: 0
+        extract_date: "{{ '%Y-%m-%d' | strftime }}"
+        records_to_extract: "{{ 15000 | random + 5000 }}"
+        extraction_directory: "/data/tmsis/eligibility/{{ '%Y%m%d' | strftime }}"
         
-    - name: Process eligibility determinations
+    - name: Create extraction directory
       debug:
-        msg: "Processing eligibility determination {{ item }}"
-      loop: "{{ range(1, (pending_determinations | int) + 1) | list }}"
-      register: determination_results
+        msg: "Creating directory {{ extraction_directory }}"
+        
+    - name: Connect to eligibility data source
+      debug:
+        msg: "Connecting to Eligibility database"
+      register: db_connection
+        
+    - name: Extract eligibility records
+      debug:
+        msg: "Extracting {{ records_to_extract }} eligibility records for T-MSIS reporting"
+      register: extract_result
+        
+    - name: Process age bands and demographics
+      debug:
+        msg: "Processing demographic categorization for CMS reporting"
       
-    - name: Simulate successful determinations
+    - name: Generate data quality metrics
       set_fact:
-        successful_determinations: "{{ successful_determinations | int + 1 }}"
-      loop: "{{ determination_results.results }}"
-      when: 
-        - item is succeeded
-        - (item.item | int) % 10 != 0  # 90% success rate
+        data_quality_score: "{{ 85 | random + 10 }}"
+        missing_data_pct: "{{ 5 | random }}.{{ 99 | random }}"
         
-    - name: Simulate failed determinations
+    - name: Apply CMS data transformation rules
+      debug:
+        msg: "Applying T-MSIS transformation rules version 3.5"
+        
+    - name: Generate T-MSIS compliant file
+      debug:
+        msg: "Generating T-MSIS eligible file in {{ extraction_directory }}/TMSIS_ELG_{{ '%Y%m%d' | strftime }}.csv"
+        
+    - name: Calculate file metrics
       set_fact:
-        failed_determinations: "{{ failed_determinations | int + 1 }}"
-      loop: "{{ determination_results.results }}"
-      when: 
-        - item is succeeded
-        - (item.item | int) % 10 == 0  # 10% failure rate
+        file_size_mb: "{{ (records_to_extract | int / 1000 * 2) | round(2) }}"
+        extract_duration_sec: "{{ 120 | random + 60 }}"
         
-    - name: Update eligibility database
+    - name: Generate extraction report
       debug:
-        msg: "Updating eligibility database with {{ successful_determinations }} successful determinations"
+        msg: "T-MSIS Eligible Extraction Report: Extracted {{ records_to_extract }} records, File size {{ file_size_mb }}MB, Duration {{ extract_duration_sec }} seconds, Data quality score {{ data_quality_score }}%"
         
-    - name: Send notifications for failed determinations
+    - name: Add to extract history
       debug:
-        msg: "Sending notifications for {{ failed_determinations }} failed determinations"
-      when: failed_determinations | int > 0
-        
-    - name: Summarize results
-      debug:
-        msg: "Eligibility determination summary: {{ pending_determinations }} processed, {{ successful_determinations }} successful, {{ failed_determinations }} failed"
+        msg: "Adding extract to history log - Extract #{{ 1000 | random + 5000 }}"
         
     - name: Set output for workflow
       set_stats:
         data:
-          eligibility_processed_count: "{{ pending_determinations }}"
-          eligibility_success_count: "{{ successful_determinations }}"
-          eligibility_failed_count: "{{ failed_determinations }}"
-          eligibility_status: "completed"
+          tmsis_eligible_extracted_count: "{{ records_to_extract }}"
+          tmsis_eligible_quality_score: "{{ data_quality_score }}"
+          tmsis_eligible_file_path: "{{ extraction_directory }}/TMSIS_ELG_{{ '%Y%m%d' | strftime }}.csv"
+          tmsis_eligible_status: "completed"
         aggregate: yes
-
-
-
 
 
 
 ===
 
 
-
 ---
-# PROVIDER-NPIValidation-Daily.yml
-# This playbook validates provider NPI numbers daily
+# T-MSIS-Provider-File-Extract.yml
+# This playbook extracts provider data for T-MSIS reporting
 
-- name: Provider NPI Validation
+- name: T-MSIS Provider File Extract
   hosts: localhost
   connection: local
   gather_facts: false
   
+  vars:
+    # Get variables from previous job
+    tmsis_eligible_extracted_count: "{{ hostvars.localhost.tmsis_eligible_extracted_count | default(10000) }}"
+    tmsis_eligible_status: "{{ hostvars.localhost.tmsis_eligible_status | default('completed') }}"
+  
   tasks:
-    - name: Display available variables
+    - name: Check previous extract status
       debug:
-        msg: "Checking for variables from previous jobs"
+        msg: "Verifying Eligible extract status: {{ tmsis_eligible_status }} with {{ tmsis_eligible_extracted_count }} eligible records processed"
         
     - name: Set simulation variables
       set_fact:
-        providers_to_validate: "{{ 20 | random + 10 }}"
-        valid_count: 0
-        invalid_count: 0
+        extract_date: "{{ '%Y-%m-%d' | strftime }}"
+        # Provider count is typically about 20% of eligible count
+        records_to_extract: "{{ (tmsis_eligible_extracted_count | int * 0.2) | int }}"
+        extraction_directory: "/data/tmsis/provider/{{ '%Y%m%d' | strftime }}"
         
-    - name: Retrieve provider list
+    - name: Create extraction directory
       debug:
-        msg: "Retrieved {{ providers_to_validate }} providers for NPI validation"
-      
-    - name: Validate provider NPIs
-      debug:
-        msg: "Validating NPI for provider {{ item }}"
-      loop: "{{ range(1, (providers_to_validate | int) + 1) | list }}"
-      register: validation_results
-      
-    - name: Count valid NPIs
-      set_fact:
-        valid_count: "{{ valid_count | int + 1 }}"
-      loop: "{{ validation_results.results }}"
-      when: 
-        - item is succeeded
-        - (item.item | int) % 7 != 0  # ~85% valid rate
+        msg: "Creating directory {{ extraction_directory }}"
         
-    - name: Count invalid NPIs
+    - name: Connect to provider data source
+      debug:
+        msg: "Connecting to Provider Management System"
+      register: db_connection
+        
+    - name: Apply taxonomy filtering
+      debug:
+        msg: "Applying CMS provider taxonomy filters for T-MSIS compliance"
+        
+    - name: Extract provider records
+      debug:
+        msg: "Extracting {{ records_to_extract }} provider records for T-MSIS reporting"
+      register: extract_result
+        
+    - name: Perform NPI validation
+      debug:
+        msg: "Validating NPI numbers against NPPES database"
+      register: npi_validation
+      
+    - name: Process provider specialties
+      debug:
+        msg: "Categorizing providers by specialty codes for CMS reporting"
+      
+    - name: Generate data quality metrics
       set_fact:
-        invalid_count: "{{ invalid_count | int + 1 }}"
-      loop: "{{ validation_results.results }}"
-      when: 
-        - item is succeeded
-        - (item.item | int) % 7 == 0  # ~15% invalid rate
-      
-    - name: Update provider database with validation results
+        data_quality_score: "{{ 80 | random + 15 }}"
+        missing_taxonomy_pct: "{{ 3 | random }}.{{ 99 | random }}"
+        invalid_npi_count: "{{ records_to_extract | int * 0.05 | int }}"
+        
+    - name: Apply CMS data transformation rules
       debug:
-        msg: "Updating provider database with validation results"
-      
-    - name: Create report of invalid NPIs
+        msg: "Applying T-MSIS provider transformation rules version 3.5"
+        
+    - name: Generate T-MSIS compliant file
       debug:
-        msg: "Creating report for {{ invalid_count }} providers with invalid NPIs"
-      when: invalid_count | int > 0
-      
-    - name: Summarize validation results
+        msg: "Generating T-MSIS provider file in {{ extraction_directory }}/TMSIS_PRV_{{ '%Y%m%d' | strftime }}.csv"
+        
+    - name: Calculate file metrics
+      set_fact:
+        file_size_mb: "{{ (records_to_extract | int / 500 * 2) | round(2) }}"
+        extract_duration_sec: "{{ 90 | random + 30 }}"
+        
+    - name: Generate extraction report
       debug:
-        msg: "NPI validation summary: {{ providers_to_validate }} providers checked, {{ valid_count }} valid, {{ invalid_count }} invalid"
+        msg: "T-MSIS Provider Extraction Report: Extracted {{ records_to_extract }} records, File size {{ file_size_mb }}MB, Duration {{ extract_duration_sec }} seconds, Data quality score {{ data_quality_score }}%, Invalid NPIs {{ invalid_npi_count }}"
+        
+    - name: Add to extract history
+      debug:
+        msg: "Adding extract to history log - Extract #{{ 1000 | random + 5000 }}"
         
     - name: Set output for workflow
       set_stats:
         data:
-          providers_validated: "{{ providers_to_validate }}"
-          valid_npi_count: "{{ valid_count }}"
-          invalid_npi_count: "{{ invalid_count }}"
-          npi_validation_status: "completed"
+          tmsis_provider_extracted_count: "{{ records_to_extract }}"
+          tmsis_provider_quality_score: "{{ data_quality_score }}"
+          tmsis_provider_file_path: "{{ extraction_directory }}/TMSIS_PRV_{{ '%Y%m%d' | strftime }}.csv"
+          tmsis_provider_status: "completed"
         aggregate: yes
-
-
-
-====
-
-
----
-# ERROR-NotificationHandler.yml
-# This playbook handles errors from failed jobs in workflows
-
-- name: Handle Workflow Errors
-  hosts: localhost
-  connection: local
-  gather_facts: false
-  
-  tasks:
-    - name: Get error context
-      set_fact:
-        failed_job: "{{ lookup('env', 'ANSIBLE_WORKFLOW_JOB_TEMPLATE_NAME') | default('Unknown job') }}"
-        error_type: "{{ lookup('env', 'ANSIBLE_FAILED_TASK') | default('Unknown error') }}"
-        
-    - name: Display error information
-      debug:
-        msg: "Error detected in workflow: Job '{{ failed_job }}' failed with error '{{ error_type }}'"
-        
-    - name: Determine error severity
-      set_fact:
-        error_severity: >-
-          {% if 'Database' in failed_job %}
-          CRITICAL
-          {% elif 'NPI' in failed_job %}
-          HIGH
-          {% elif 'Claims' in failed_job %}
-          MEDIUM
-          {% else %}
-          LOW
-          {% endif %}
-        
-    - name: Simulate sending email notification
-      debug:
-        msg: "ALERT [{{ error_severity }}]: Job '{{ failed_job }}' failed in the healthcare processing workflow. Immediate attention required."
-        
-    - name: Log error details
-      debug:
-        msg: "Error details would be logged to monitoring system here. Error type: {{ error_type }}"
-        
-    - name: Create error report
-      debug:
-        msg: "Generated error report for operations team with remediation steps"
-        
-    - name: Check if auto-recovery is possible
-      debug:
-        msg: "Checking if automated recovery is possible for this error type"
-        
-    - name: Simulate recovery attempt
-      debug:
-        msg: "Attempted recovery process. Recovery actions would be implemented here for appropriate error types."
-        
-    - name: Set output status
-      set_stats:
-        data:
-          error_handler_status: "completed"
-          error_recovery_attempted: true
-          error_job: "{{ failed_job }}"
-        aggregate: yes
-
-
-
-
-====
-
-
----
-# TEST-FailureSimulation.yml
-# This playbook intentionally fails for testing error handling
-
-- name: Intentional Failure for Testing
-  hosts: localhost
-  connection: local
-  gather_facts: false
-  
-  tasks:
-    - name: This will succeed
-      debug:
-        msg: "This task succeeds"
-        
-    - name: This will fail intentionally
-      fail:
-        msg: "This is an intentional failure to test error handling"
-      when: true  # Always fail
-        
-    - name: This will never run
-      debug:
-        msg: "This will never run because the previous task failed"
-
 
 
 
 ===
 
 
-
 ---
-# TEST-FailureSimulation.yml
-# This playbook intentionally fails for testing error handling
+# T-MSIS-In-Patient-Claims-File-Extract.yml
+# This playbook extracts in-patient claims data for T-MSIS reporting
 
-- name: Intentional Failure for Testing
+- name: T-MSIS In-Patient Claims File Extract
   hosts: localhost
   connection: local
   gather_facts: false
   
+  vars:
+    # Get variables from previous jobs
+    tmsis_eligible_extracted_count: "{{ hostvars.localhost.tmsis_eligible_extracted_count | default(10000) }}"
+    tmsis_provider_extracted_count: "{{ hostvars.localhost.tmsis_provider_extracted_count | default(2000) }}"
+    tmsis_provider_status: "{{ hostvars.localhost.tmsis_provider_status | default('completed') }}"
+  
   tasks:
-    - name: This will succeed
+    - name: Check previous extract status
       debug:
-        msg: "This task succeeds"
+        msg: "Verifying Provider extract status: {{ tmsis_provider_status }} with {{ tmsis_provider_extracted_count }} provider records processed"
         
-    - name: This will fail intentionally
-      fail:
-        msg: "This is an intentional failure to test error handling"
-      when: true  # Always fail
+    - name: Set simulation variables
+      set_fact:
+        extract_date: "{{ '%Y-%m-%d' | strftime }}"
+        # In-patient claims are approximately 10% of eligible count
+        records_to_extract: "{{ (tmsis_eligible_extracted_count | int * 0.1) | int }}"
+        extraction_directory: "/data/tmsis/claims/inpatient/{{ '%Y%m%d' | strftime }}"
         
-    - name: This will never run
+    - name: Create extraction directory
       debug:
-        msg: "This will never run because the previous task failed"
+        msg: "Creating directory {{ extraction_directory }}"
+        
+    - name: Connect to claims data source
+      debug:
+        msg: "Connecting to Claims Processing System"
+      register: db_connection
+        
+    - name: Apply date range filtering
+      debug:
+        msg: "Filtering in-patient claims for date range {{ '%Y-%m-01' | strftime }} to {{ '%Y-%m-%d' | strftime }}"
+        
+    - name: Extract in-patient claims records
+      debug:
+        msg: "Extracting {{ records_to_extract }} in-patient claims records for T-MSIS reporting"
+      register: extract_result
+        
+    - name: Process diagnosis codes
+      debug:
+        msg: "Processing ICD-10 diagnosis codes for compliance"
+      register: diagnosis_processing
+      
+    - name: Process procedure codes
+      debug:
+        msg: "Processing procedure codes according to HCPCS/CPT standards"
+        
+    - name: Calculate claim metrics
+      set_fact:
+        total_claim_amount: "{{ (records_to_extract | int * 2500) | int }}"
+        avg_claim_amount: "{{ 2500 | int }}"
+        top_diagnosis: "J18.9 - Pneumonia, unspecified organism"
+        
+    - name: Generate data quality metrics
+      set_fact:
+        data_quality_score: "{{ 85 | random + 10 }}"
+        missing_diagnosis_pct: "{{ 2 | random }}.{{ 99 | random }}"
+        duplicate_claim_count: "{{ (records_to_extract | int * 0.02) | int }}"
+        
+    - name: Apply CMS data transformation rules
+      debug:
+        msg: "Applying T-MSIS in-patient claims transformation rules version 3.5"
+        
+    - name: Generate T-MSIS compliant file
+      debug:
+        msg: "Generating T-MSIS in-patient claims file in {{ extraction_directory }}/TMSIS_IP_{{ '%Y%m%d' | strftime }}.csv"
+        
+    - name: Calculate file metrics
+      set_fact:
+        file_size_mb: "{{ (records_to_extract | int / 100) | round(2) }}"
+        extract_duration_sec: "{{ 150 | random + 60 }}"
+        
+    - name: Generate extraction report
+      debug:
+        msg: "T-MSIS In-Patient Claims Extraction Report: Extracted {{ records_to_extract }} records, Total claim amount ${{ total_claim_amount }}, File size {{ file_size_mb }}MB, Duration {{ extract_duration_sec }} seconds, Data quality score {{ data_quality_score }}%"
+        
+    - name: Create CMS submission manifest
+      debug:
+        msg: "Creating CMS submission manifest for in-patient claims batch"
+        
+    - name: Set output for workflow
+      set_stats:
+        data:
+          tmsis_inpatient_extracted_count: "{{ records_to_extract }}"
+          tmsis_inpatient_quality_score: "{{ data_quality_score }}"
+          tmsis_inpatient_file_path: "{{ extraction_directory }}/TMSIS_IP_{{ '%Y%m%d' | strftime }}.csv"
+          tmsis_inpatient_status: "completed"
+          tmsis_inpatient_total_amount: "{{ total_claim_amount }}"
+        aggregate: yes
+
+
+
+===
+
+---
+# T-MSIS-Long-Term-Care-Claims-File-Extract.yml
+# This playbook extracts long-term care claims data for T-MSIS reporting
+
+- name: T-MSIS Long-Term Care Claims File Extract
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  
+  vars:
+    # Get variables from previous jobs
+    tmsis_eligible_extracted_count: "{{ hostvars.localhost.tmsis_eligible_extracted_count | default(10000) }}"
+    tmsis_inpatient_extracted_count: "{{ hostvars.localhost.tmsis_inpatient_extracted_count | default(1000) }}"
+    tmsis_inpatient_status: "{{ hostvars.localhost.tmsis_inpatient_status | default('completed') }}"
+  
+  tasks:
+    - name: Check previous extract status
+      debug:
+        msg: "Verifying In-Patient extract status: {{ tmsis_inpatient_status }} with {{ tmsis_inpatient_extracted_count }} in-patient claims processed"
+        
+    - name: Set simulation variables
+      set_fact:
+        extract_date: "{{ '%Y-%m-%d' | strftime }}"
+        # Long-term care claims are approximately 5% of eligible count
+        records_to_extract: "{{ (tmsis_eligible_extracted_count | int * 0.05) | int }}"
+        extraction_directory: "/data/tmsis/claims/ltc/{{ '%Y%m%d' | strftime }}"
+        
+    - name: Create extraction directory
+      debug:
+        msg: "Creating directory {{ extraction_directory }}"
+        
+    - name: Connect to long-term care data source
+      debug:
+        msg: "Connecting to Long-Term Care Processing System"
+      register: db_connection
+        
+    - name: Apply date range filtering
+      debug:
+        msg: "Filtering long-term care claims for date range {{ '%Y-%m-01' | strftime }} to {{ '%Y-%m-%d' | strftime }}"
+        
+    - name: Extract long-term care claims records
+      debug:
+        msg: "Extracting {{ records_to_extract }} long-term care claims records for T-MSIS reporting"
+      register: extract_result
+        
+    - name: Process facility information
+      debug:
+        msg: "Processing facility identification and certification data"
+      register: facility_processing
+      
+    - name: Process level of care codes
+      debug:
+        msg: "Processing level of care codes according to CMS standards"
+        
+    - name: Calculate claim metrics
+      set_fact:
+        total_claim_amount: "{{ (records_to_extract | int * 8500) | int }}"
+        avg_claim_amount: "{{ 8500 | int }}"
+        avg_length_of_stay_days: "{{ 180 | random + 20 }}"
+        
+    - name: Generate data quality metrics
+      set_fact:
+        data_quality_score: "{{ 90 | random + 7 }}"
+        missing_facility_data_pct: "{{ 1 | random }}.{{ 99 | random }}"
+        
+    - name: Apply CMS data transformation rules
+      debug:
+        msg: "Applying T-MSIS long-term care claims transformation rules version 3.5"
+        
+    - name: Generate T-MSIS compliant file
+      debug:
+        msg: "Generating T-MSIS long-term care claims file in {{ extraction_directory }}/TMSIS_LTC_{{ '%Y%m%d' | strftime }}.csv"
+        
+    - name: Calculate file metrics
+      set_fact:
+        file_size_mb: "{{ (records_to_extract | int / 80) | round(2) }}"
+        extract_duration_sec: "{{ 120 | random + 40 }}"
+        
+    - name: Generate extraction report
+      debug:
+        msg: "T-MSIS Long-Term Care Claims Extraction Report: Extracted {{ records_to_extract }} records, Total claim amount ${{ total_claim_amount }}, Avg stay {{ avg_length_of_stay_days }} days, File size {{ file_size_mb }}MB, Duration {{ extract_duration_sec }} seconds, Data quality score {{ data_quality_score }}%"
+        
+    - name: Create CMS submission manifest
+      debug:
+        msg: "Creating CMS submission manifest for long-term care claims batch"
+        
+    - name: Generate CMS compliance dashboard data
+      debug:
+        msg: "Generating data for CMS compliance dashboard - Overall submission compliance score: {{ data_quality_score }}%"
+        
+    - name: Set output for workflow
+      set_stats:
+        data:
+          tmsis_ltc_extracted_count: "{{ records_to_extract }}"
+          tmsis_ltc_quality_score: "{{ data_quality_score }}"
+          tmsis_ltc_file_path: "{{ extraction_directory }}/TMSIS_LTC_{{ '%Y%m%d' | strftime }}.csv"
+          tmsis_ltc_status: "completed"
+          tmsis_ltc_total_amount: "{{ total_claim_amount }}"
+          tmsis_total_records: "{{ (tmsis_eligible_extracted_count | int) + (tmsis_provider_extracted_count | default(2000) | int) + (tmsis_inpatient_extracted_count | int) + (records_to_extract | int) }}"
+          tmsis_final_quality_score: "{{ ((tmsis_eligible_quality_score | default(90) | int) + (tmsis_provider_quality_score | default(90) | int) + (tmsis_inpatient_quality_score | default(90) | int) + (data_quality_score | int)) / 4 }}"
+        aggregate: yes
+        
+    - name: Generate T-MSIS final report
+      debug:
+        msg: |
+          ================================================
+                    T-MSIS EXTRACTION COMPLETE
+          ================================================
+          Total Records Processed: {{ (tmsis_eligible_extracted_count | int) + (tmsis_provider_extracted_count | default(2000) | int) + (tmsis_inpatient_extracted_count | int) + (records_to_extract | int) }}
+          Overall Data Quality Score: {{ ((tmsis_eligible_quality_score | default(90) | int) + (tmsis_provider_quality_score | default(90) | int) + (tmsis_inpatient_quality_score | default(90) | int) + (data_quality_score | int)) / 4 }}%
+          Total Claims Amount: ${{ (tmsis_inpatient_total_amount | default(0) | int) + (total_claim_amount | int) }}
+          
+          Files Generated:
+          - Eligible Members: {{ tmsis_eligible_extracted_count | default(0) }} records
+          - Providers: {{ tmsis_provider_extracted_count | default(0) }} records
+          - In-Patient Claims: {{ tmsis_inpatient_extracted_count | default(0) }} records
+          - Long-Term Care Claims: {{ records_to_extract }} records
+          
+          All files are ready for secure transmission to CMS.
+          ================================================
