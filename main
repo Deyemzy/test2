@@ -59,24 +59,32 @@
     - name: Run address validation
       debug:
         msg: "Validating provider addresses against USPS database"
+        
+    - name: Calculate address validation errors
       set_fact:
         address_validation_errors: "{{ (total_providers | int * 0.025) | int }}"
         
     - name: Verify provider licenses
       debug:
         msg: "Verifying provider licenses against state licensing boards"
+        
+    - name: Calculate license validation errors
       set_fact:
         license_validation_errors: "{{ (total_providers | int * 0.012) | int }}"
         
     - name: Check for sanctions and exclusions
       debug:
         msg: "Checking providers against OIG exclusion list and NPDB"
+        
+    - name: Calculate high risk providers
       set_fact:
         high_risk_providers: "{{ (total_providers | int * 0.002) | int }}"
         
     - name: Validate taxonomy codes
       debug:
         msg: "Validating provider taxonomy codes against latest NUCC code set"
+        
+    - name: Calculate taxonomy validation errors
       set_fact:
         taxonomy_validation_errors: "{{ (total_providers | int * 0.015) | int }}"
         
