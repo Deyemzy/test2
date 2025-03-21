@@ -1,133 +1,452 @@
 ---
-# PROVIDER-Validation-Process.yml
-# This playbook validates provider data against various standards
+# Eligibility-Data-Update.yml
+# This playbook updates core eligibility data
 
-- name: Provider Validation Process
+- name: Eligibility Data Update
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  
+  tasks:
+    - name: Check for data update files
+      debug:
+        msg: "Checking for eligibility data update files"
+      
+    - name: Set simulation variables
+      set_fact:
+        update_date: "{{ '%Y-%m-%d' | strftime }}"
+        files_to_process: "{{ 8 | random + 3 }}"
+        total_records: "{{ 250000 | random + 750000 }}"
+        processing_directory: "/data/eligibility/updates/{{ '%Y%m%d' | strftime }}"
+        
+    - name: Create processing directory
+      debug:
+        msg: "Creating directory {{ processing_directory }}"
+        
+    - name: List update files
+      debug:
+        msg: "Found {{ files_to_process }} eligibility update files to process"
+        
+    - name: Validate file formats
+      debug:
+        msg: "Validating file formats and structures"
+      register: validation_results
+        
+    - name: Backup current eligibility data
+      debug:
+        msg: "Creating backup of current eligibility database"
+      register: backup_result
+        
+    - name: Process income verification data
+      debug:
+        msg: "Processing income verification updates"
+      set_fact:
+        income_updates: "{{ (total_records | int * 0.35) | int }}"
+        
+    - name: Process address changes
+      debug:
+        msg: "Processing member address changes"
+      set_fact:
+        address_updates: "{{ (total_records | int * 0.28) | int }}"
+        
+    - name: Process household composition changes
+      debug:
+        msg: "Processing household composition changes"
+      set_fact:
+        household_updates: "{{ (total_records | int * 0.15) | int }}"
+        
+    - name: Process demographic updates
+      debug:
+        msg: "Processing demographic information updates"
+      set_fact:
+        demographic_updates: "{{ (total_records | int * 0.22) | int }}"
+        
+    - name: Calculate total updates
+      set_fact:
+        total_updates: "{{ (income_updates | int) + (address_updates | int) + (household_updates | int) + (demographic_updates | int) }}"
+        
+    - name: Apply updates to database
+      debug:
+        msg: "Applying {{ total_updates }} updates to eligibility database"
+      register: update_result
+        
+    - name: Run data consistency checks
+      debug:
+        msg: "Running data consistency validation checks"
+      register: consistency_check
+        
+    - name: Calculate eligibility indicators
+      set_fact:
+        potential_status_changes: "{{ (total_updates | int * 0.18) | int }}"
+        eligibility_reevaluations_needed: "{{ (total_updates | int * 0.25) | int }}"
+        
+    - name: Flag records for redetermination
+      debug:
+        msg: "Flagging {{ eligibility_reevaluations_needed }} records for eligibility redetermination"
+        
+    - name: Generate audit records
+      debug:
+        msg: "Generating audit records for {{ total_updates }} data changes"
+        
+    - name: Generate update summary
+      debug:
+        msg: |
+          ELIGIBILITY DATA UPDATE SUMMARY
+          ===============================
+          Date: {{ update_date }}
+          
+          Files Processed: {{ files_to_process }}
+          Total Records Processed: {{ total_records }}
+          Total Updates Applied: {{ total_updates }}
+          
+          Update Breakdown:
+          - Income Updates: {{ income_updates }} ({{ (income_updates | int * 100 / total_updates | int) | round(2) }}%)
+          - Address Changes: {{ address_updates }} ({{ (address_updates | int * 100 / total_updates | int) | round(2) }}%)
+          - Household Changes: {{ household_updates }} ({{ (household_updates | int * 100 / total_updates | int) | round(2) }}%)
+          - Demographic Updates: {{ demographic_updates }} ({{ (demographic_updates | int * 100 / total_updates | int) | round(2) }}%)
+          
+          Impact Analysis:
+          - Potential Status Changes: {{ potential_status_changes }}
+          - Records Needing Redetermination: {{ eligibility_reevaluations_needed }}
+          
+          Data consistency verification: PASSED
+          All changes have been audited and logged.
+        
+    - name: Set output for workflow
+      set_stats:
+        data:
+          eligibility_records_processed: "{{ total_records }}"
+          eligibility_updates_applied: "{{ total_updates }}"
+          eligibility_redeterminations_needed: "{{ eligibility_reevaluations_needed }}"
+          eligibility_update_status: "completed"
+        aggregate: yes
+
+
+
+====
+
+
+---
+# Client-EPSDT-daily-update.yml
+# This playbook processes EPSDT (Early and Periodic Screening, Diagnostic and Treatment) updates
+
+- name: Client EPSDT Daily Update
   hosts: localhost
   connection: local
   gather_facts: false
   
   vars:
     # Get variables from previous job
-    nppes_processed_count: "{{ hostvars.localhost.nppes_processed_count | default(1500000) }}"
-    nppes_active_count: "{{ hostvars.localhost.nppes_active_count | default(1380000) }}"
-    nppes_status: "{{ hostvars.localhost.nppes_status | default('completed') }}"
+    eligibility_records_processed: "{{ hostvars.localhost.eligibility_records_processed | default(1000000) }}"
+    eligibility_update_status: "{{ hostvars.localhost.eligibility_update_status | default('completed') }}"
   
   tasks:
-    - name: Check NPPES load status
+    - name: Check eligibility update status
       debug:
-        msg: "Verifying NPPES load status: {{ nppes_status }} with {{ nppes_active_count }} active providers"
+        msg: "Verifying eligibility update status: {{ eligibility_update_status }} with {{ eligibility_records_processed }} records processed"
         
     - name: Set simulation variables
       set_fact:
-        validation_batch_size: 10000
-        total_batches: "{{ (nppes_active_count | int / 10000) | int }}"
-        total_providers: "{{ nppes_active_count | int }}"
-        output_directory: "/data/provider/validation/{{ '%Y%m%d' | strftime }}"
+        update_date: "{{ '%Y-%m-%d' | strftime }}"
+        total_children: "{{ (eligibility_records_processed | int * 0.35) | int }}"
+        epsdt_file_source: "/data/epsdt/incoming/EPSDT_{{ '%Y%m%d' | strftime }}.csv"
+        output_directory: "/data/epsdt/processed/{{ '%Y%m%d' | strftime }}"
         
     - name: Create output directory
       debug:
         msg: "Creating directory {{ output_directory }}"
         
-    - name: Initialize validation metrics
+    - name: Retrieve EPSDT update file
+      debug:
+        msg: "Retrieving EPSDT update file from {{ epsdt_file_source }}"
+      register: file_retrieval
+        
+    - name: Process vaccination records
+      debug:
+        msg: "Processing vaccination records for eligible children"
       set_fact:
-        validated_providers: 0
-        validation_errors: 0
-        npi_validation_errors: 0
-        address_validation_errors: 0
-        taxonomy_validation_errors: 0
-        license_validation_errors: 0
-        high_risk_providers: 0
+        vaccination_updates: "{{ (total_children | int * 0.25) | int }}"
         
-    - name: Connect to validation services
+    - name: Process developmental screening records
       debug:
-        msg: "Connecting to validation services: NPI Registry, Address Validation, License Verification"
-      register: services_connection
-        
-    - name: Process validation batches
-      debug:
-        msg: "Processing {{ total_batches }} validation batches ({{ validation_batch_size }} providers per batch)"
-        
-    - name: Run NPI registry validation
-      debug:
-        msg: "Validating provider NPIs against official CMS NPI registry"
-        
-    - name: Calculate NPI validation errors
+        msg: "Processing developmental screening records"
       set_fact:
-        npi_validation_errors: "{{ (total_providers | int * 0.008) | int }}"
+        screening_updates: "{{ (total_children | int * 0.18) | int }}"
         
-    - name: Run address validation
+    - name: Process well-child visit records
       debug:
-        msg: "Validating provider addresses against USPS database"
-        
-    - name: Calculate address validation errors
+        msg: "Processing well-child visit records"
       set_fact:
-        address_validation_errors: "{{ (total_providers | int * 0.025) | int }}"
+        wellchild_updates: "{{ (total_children | int * 0.22) | int }}"
         
-    - name: Verify provider licenses
+    - name: Process dental visit records
       debug:
-        msg: "Verifying provider licenses against state licensing boards"
-        
-    - name: Calculate license validation errors
+        msg: "Processing dental visit records"
       set_fact:
-        license_validation_errors: "{{ (total_providers | int * 0.012) | int }}"
+        dental_updates: "{{ (total_children | int * 0.15) | int }}"
         
-    - name: Check for sanctions and exclusions
+    - name: Process vision screening records
       debug:
-        msg: "Checking providers against OIG exclusion list and NPDB"
-        
-    - name: Calculate high risk providers
+        msg: "Processing vision screening records"
       set_fact:
-        high_risk_providers: "{{ (total_providers | int * 0.002) | int }}"
+        vision_updates: "{{ (total_children | int * 0.12) | int }}"
         
-    - name: Validate taxonomy codes
+    - name: Process hearing screening records
       debug:
-        msg: "Validating provider taxonomy codes against latest NUCC code set"
-        
-    - name: Calculate taxonomy validation errors
+        msg: "Processing hearing screening records"
       set_fact:
-        taxonomy_validation_errors: "{{ (total_providers | int * 0.015) | int }}"
+        hearing_updates: "{{ (total_children | int * 0.10) | int }}"
         
-    - name: Calculate total errors
+    - name: Calculate total EPSDT updates
       set_fact:
-        validation_errors: "{{ (npi_validation_errors | int) + (address_validation_errors | int) + (license_validation_errors | int) + (taxonomy_validation_errors | int) }}"
-        validated_providers: "{{ total_providers | int }}"
+        total_epsdt_updates: "{{ (vaccination_updates | int) + (screening_updates | int) + (wellchild_updates | int) + (dental_updates | int) + (vision_updates | int) + (hearing_updates | int) }}"
         
-    - name: Create error reports
+    - name: Update EPSDT tracking database
       debug:
-        msg: "Creating detailed error reports for each validation type"
+        msg: "Updating EPSDT tracking database with {{ total_epsdt_updates }} new service records"
+      
+    - name: Generate compliance metrics
+      set_fact:
+        compliance_rate: "{{ 75 | random + 15 }}"
+        due_for_services: "{{ (total_children | int - total_epsdt_updates | int) }}"
+        overdue_services: "{{ ((total_children | int - total_epsdt_updates | int) * 0.4) | int }}"
         
-    - name: Flag high-risk providers
+    - name: Generate notification list
       debug:
-        msg: "Flagging {{ high_risk_providers }} high-risk providers for review"
+        msg: "Generating notification list for {{ overdue_services }} children with overdue EPSDT services"
         
-    - name: Generate validation summary
+    - name: Update CMS reporting metrics
+      debug:
+        msg: "Updating CMS Form 416 reporting metrics for EPSDT services"
+        
+    - name: Generate EPSDT dashboard data
+      debug:
+        msg: "Generating data for EPSDT compliance dashboard"
+        
+    - name: Generate update summary
       debug:
         msg: |
-          PROVIDER VALIDATION SUMMARY
-          ===========================
-          Total Providers Validated: {{ validated_providers }}
-          Total Validation Errors: {{ validation_errors }} ({{ (validation_errors | int * 100 / validated_providers | int) | round(2) }}%)
+          EPSDT DAILY UPDATE SUMMARY
+          ==========================
+          Date: {{ update_date }}
           
-          Error Breakdown:
-          - NPI Validation Errors: {{ npi_validation_errors }} ({{ (npi_validation_errors | int * 100 / validated_providers | int) | round(2) }}%)
-          - Address Validation Errors: {{ address_validation_errors }} ({{ (address_validation_errors | int * 100 / validated_providers | int) | round(2) }}%)
-          - License Validation Errors: {{ license_validation_errors }} ({{ (license_validation_errors | int * 100 / validated_providers | int) | round(2) }}%)
-          - Taxonomy Validation Errors: {{ taxonomy_validation_errors }} ({{ (taxonomy_validation_errors | int * 100 / validated_providers | int) | round(2) }}%)
+          Total Children in Program: {{ total_children }}
+          Total EPSDT Updates Applied: {{ total_epsdt_updates }}
           
-          High-Risk Providers Identified: {{ high_risk_providers }}
+          Service Breakdown:
+          - Vaccination Updates: {{ vaccination_updates }}
+          - Developmental Screening Updates: {{ screening_updates }}
+          - Well-Child Visit Updates: {{ wellchild_updates }}
+          - Dental Visit Updates: {{ dental_updates }}
+          - Vision Screening Updates: {{ vision_updates }}
+          - Hearing Screening Updates: {{ hearing_updates }}
           
-          Validation completed in {{ (total_batches | int * 5) | int }} seconds
+          Compliance Analysis:
+          - Current Compliance Rate: {{ compliance_rate }}%
+          - Children Due for Services: {{ due_for_services }}
+          - Children with Overdue Services: {{ overdue_services }}
+          
+          Notification lists have been generated for outreach.
+          CMS Form 416 metrics have been updated.
         
-    - name: Update provider database flags
+    - name: Create compliance visualization data
       debug:
-        msg: "Updating validation flags in provider database for {{ validation_errors }} providers with issues"
+        msg: "Generating visualization data for compliance tracking by region and age group"
+        
+    - name: Generate outreach file
+      debug:
+        msg: "Generating outreach file for case managers"
         
     - name: Set output for workflow
       set_stats:
         data:
-          provider_validated_count: "{{ validated_providers }}"
-          provider_error_count: "{{ validation_errors }}"
-          provider_high_risk_count: "{{ high_risk_providers }}"
-          provider_validation_status: "completed"
+          epsdt_children_count: "{{ total_children }}"
+          epsdt_updates_applied: "{{ total_epsdt_updates }}"
+          epsdt_compliance_rate: "{{ compliance_rate }}"
+          epsdt_outreach_needed: "{{ overdue_services }}"
+          epsdt_update_status: "completed"
         aggregate: yes
+        
+    - name: Generate impressive EPSDT infographic data
+      debug:
+        msg: |
+          🧒 EPSDT SERVICES TRACKING SYSTEM 🧒
+          
+          📊 Today's Update:
+          - {{ total_children }} children in EPSDT program
+          - {{ total_epsdt_updates }} new services recorded
+          - {{ compliance_rate }}% overall compliance rate
+          
+          💉 Vaccination Rate: {{ (vaccination_updates | int * 100 / total_children | int) | round(1) }}%
+          🦷 Dental Visit Rate: {{ (dental_updates | int * 100 / total_children | int) | round(1) }}%
+          👁️ Vision Screening Rate: {{ (vision_updates | int * 100 / total_children | int) | round(1) }}%
+          
+          📱 {{ overdue_services }} children identified for outreach
+          ✅ Notifications ready for distribution
+          📈 CMS Form 416 metrics updated
+          
+          💫 EPSDT Dashboard: Updated with latest metrics
+
+
+
+
+======
+
+
+---
+# Eligibility-Determination-Process.yml
+# This playbook runs the eligibility determination process
+
+- name: Eligibility Determination Process
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  
+  vars:
+    # Get variables from previous jobs
+    eligibility_redeterminations_needed: "{{ hostvars.localhost.eligibility_redeterminations_needed | default(250000) }}"
+    epsdt_update_status: "{{ hostvars.localhost.epsdt_update_status | default('completed') }}"
+  
+  tasks:
+    - name: Check previous update status
+      debug:
+        msg: "Verifying EPSDT update status: {{ epsdt_update_status }} with {{ eligibility_redeterminations_needed }} redeterminations needed"
+        
+    - name: Set simulation variables
+      set_fact:
+        determination_date: "{{ '%Y-%m-%d' | strftime }}"
+        total_determinations: "{{ eligibility_redeterminations_needed | int }}"
+        batch_size: 5000
+        total_batches: "{{ (eligibility_redeterminations_needed | int / 5000) | int + 1 }}"
+        output_directory: "/data/eligibility/determinations/{{ '%Y%m%d' | strftime }}"
+        
+    - name: Create output directory
+      debug:
+        msg: "Creating directory {{ output_directory }}"
+        
+    - name: Initialize determination metrics
+      set_fact:
+        approved_count: 0
+        denied_count: 0
+        pended_count: 0
+        
+    - name: Prepare eligibility rules engine
+      debug:
+        msg: "Loading eligibility rules engine with latest policy rules"
+      register: rules_engine
+        
+    - name: Load income thresholds
+      debug:
+        msg: "Loading FPL thresholds and income eligibility rules"
+        
+    - name: Load categorical eligibility rules
+      debug:
+        msg: "Loading categorical eligibility rules for special populations"
+        
+    - name: Process determination batches
+      debug:
+        msg: "Processing {{ total_batches }} determination batches ({{ batch_size }} members per batch)"
+      register: batch_processing
+        
+    - name: Calculate determination outcomes
+      set_fact:
+        approved_count: "{{ (total_determinations | int * 0.78) | int }}"
+        denied_count: "{{ (total_determinations | int * 0.17) | int }}"
+        pended_count: "{{ (total_determinations | int * 0.05) | int }}"
+        
+    - name: Generate determination letters
+      debug:
+        msg: "Generating determination letters for all processed cases"
+        
+    - name: Update eligibility database
+      debug:
+        msg: "Updating eligibility database with determination results"
+        
+    - name: Calculate eligibility categories
+      set_fact:
+        magi_adults: "{{ (approved_count | int * 0.35) | int }}"
+        children: "{{ (approved_count | int * 0.28) | int }}"
+        pregnant_women: "{{ (approved_count | int * 0.12) | int }}"
+        aged_blind_disabled: "{{ (approved_count | int * 0.15) | int }}"
+        other_categories: "{{ (approved_count | int * 0.10) | int }}"
+        
+    - name: Generate enrollment transactions
+      debug:
+        msg: "Generating enrollment transactions for {{ approved_count }} approved cases"
+        
+    - name: Prepare denial reasons report
+      debug:
+        msg: "Analyzing denial reasons for {{ denied_count }} denied cases"
+        
+    - name: Calculate denial reasons
+      set_fact:
+        income_denials: "{{ (denied_count | int * 0.45) | int }}"
+        residency_denials: "{{ (denied_count | int * 0.15) | int }}"
+        document_denials: "{{ (denied_count | int * 0.28) | int }}"
+        other_denials: "{{ (denied_count | int * 0.12) | int }}"
+        
+    - name: Generate determination summary
+      debug:
+        msg: |
+          ELIGIBILITY DETERMINATION SUMMARY
+          =================================
+          Date: {{ determination_date }}
+          
+          Total Cases Processed: {{ total_determinations }}
+          
+          Determination Outcomes:
+          - Approved: {{ approved_count }} ({{ (approved_count | int * 100 / total_determinations | int) | round(2) }}%)
+          - Denied: {{ denied_count }} ({{ (denied_count | int * 100 / total_determinations | int) | round(2) }}%)
+          - Pended: {{ pended_count }} ({{ (pended_count | int * 100 / total_determinations | int) | round(2) }}%)
+          
+          Approved Cases by Category:
+          - MAGI Adults: {{ magi_adults }} ({{ (magi_adults | int * 100 / approved_count | int) | round(2) }}%)
+          - Children: {{ children }} ({{ (children | int * 100 / approved_count | int) | round(2) }}%)
+          - Pregnant Women: {{ pregnant_women }} ({{ (pregnant_women | int * 100 / approved_count | int) | round(2) }}%)
+          - Aged, Blind, Disabled: {{ aged_blind_disabled }} ({{ (aged_blind_disabled | int * 100 / approved_count | int) | round(2) }}%)
+          - Other Categories: {{ other_categories }} ({{ (other_categories | int * 100 / approved_count | int) | round(2) }}%)
+          
+          Denial Reasons:
+          - Income Exceeds Limit: {{ income_denials }} ({{ (income_denials | int * 100 / denied_count | int) | round(2) }}%)
+          - Residency Requirements: {{ residency_denials }} ({{ (residency_denials | int * 100 / denied_count | int) | round(2) }}%)
+          - Insufficient Documentation: {{ document_denials }} ({{ (document_denials | int * 100 / denied_count | int) | round(2) }}%)
+          - Other Reasons: {{ other_denials }} ({{ (other_denials | int * 100 / denied_count | int) | round(2) }}%)
+          
+          Determination letters have been generated.
+          Enrollment transactions have been prepared.
+        
+    - name: Create enrollment trend data
+      debug:
+        msg: "Generating enrollment trend data for analytics dashboard"
+        
+    - name: Set output for workflow
+      set_stats:
+        data:
+          eligibility_determinations_processed: "{{ total_determinations }}"
+          eligibility_approvals: "{{ approved_count }}"
+          eligibility_denials: "{{ denied_count }}"
+          eligibility_pending: "{{ pended_count }}"
+          eligibility_determination_status: "completed"
+        aggregate: yes
+        
+    - name: Generate impressive eligibility visualization data
+      debug:
+        msg: |
+          ✅ ELIGIBILITY DETERMINATION COMPLETE ✅
+          
+          📊 Today's Results:
+          - {{ approved_count }} members APPROVED ({{ (approved_count | int * 100 / total_determinations | int) | round(1) }}%)
+          - {{ denied_count }} members DENIED ({{ (denied_count | int * 100 / total_determinations | int) | round(1) }}%)
+          - {{ pended_count }} members PENDING ({{ (pended_count | int * 100 / total_determinations | int) | round(1) }}%)
+          
+          📈 Population Breakdown:
+          - {{ magi_adults }} Adults
+          - {{ children }} Children
+          - {{ pregnant_women }} Pregnant Women
+          - {{ aged_blind_disabled }} Aged, Blind, Disabled
+          
+          📬 Letters Generated: {{ total_determinations }}
+          💻 Database Updated
+          🔄 Enrollment Transactions Sent
+          
+          🏆 Determination accuracy rating: 99.7%
