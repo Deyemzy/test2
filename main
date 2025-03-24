@@ -1,211 +1,132 @@
-import sys
-import datetime
-from awsglue.transforms import *
-from awsglue.utils import getResolvedOptions
-from pyspark.context import SparkContext
-from awsglue.context import GlueContext
-from awsglue.job import Job
-from awsglue.dynamicframe import DynamicFrame
-from pyspark.sql.functions import lit
+# VPC for CRADA project
+resource "aws_vpc" "crada_vpc" {
+  cidr_block           = var.vpc_cidr_block
+  enable_dns_support   = true
+  enable_dns_hostnames = true
+  
+  tags = {
+    Name        = "${var.project_name}-vpc"
+    Environment = var.environment
+  }
+}
 
-# Get job parameters
-args = getResolvedOptions(sys.argv, [
-    'JOB_NAME',
-    'source_database',
-    'target_database',
-    'target_schema'
-])
+# Create two subnets in different availability zones
+resource "aws_subnet" "crada_subnet_1" {
+  vpc_id                  = aws_vpc.crada_vpc.id
+  cidr_block              = cidrsubnet(var.vpc_cidr_block, 4, 0)
+  availability_zone       = "${var.aws_region}a"
+  map_public_ip_on_launch = true
+  
+  tags = {
+    Name        = "${var.project_name}-subnet-1"
+    Environment = var.environment
+  }
+}
 
-# Initialize Spark and Glue contexts
-sc = SparkContext()
-glueContext = GlueContext(sc)
-spark = glueContext.spark_session
-job = Job(glueContext)
-job.init(args['JOB_NAME'], args)
+resource "aws_subnet" "crada_subnet_2" {
+  vpc_id                  = aws_vpc.crada_vpc.id
+  cidr_block              = cidrsubnet(var.vpc_cidr_block, 4, 1)
+  availability_zone       = "${var.aws_region}b"
+  map_public_ip_on_launch = true
+  
+  tags = {
+    Name        = "${var.project_name}-subnet-2"
+    Environment = var.environment
+  }
+}
 
-# Current timestamp for logging and partitioning
-current_time = datetime.datetime.now()
-year = current_time.year
-month = current_time.month
-day = current_time.day
-timestamp = current_time.strftime("%Y-%m-%d %H:%M:%S")
+# Internet Gateway
+resource "aws_internet_gateway" "crada_igw" {
+  vpc_id = aws_vpc.crada_vpc.id
+  
+  tags = {
+    Name        = "${var.project_name}-igw"
+    Environment = var.environment
+  }
+}
 
-print(f"Starting daily ETL job at {timestamp}")
+# Route Table for public access
+resource "aws_route_table" "crada_public_rt" {
+  vpc_id = aws_vpc.crada_vpc.id
+  
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.crada_igw.id
+  }
+  
+  tags = {
+    Name        = "${var.project_name}-public-rt"
+    Environment = var.environment
+  }
+}
 
-# Read from source tables - this would be adapted to your specific MHS Genesis schema
-tables_to_process = ["patients", "encounters", "observations", "medications"]
+# Associate Route Table with Subnets
+resource "aws_route_table_association" "subnet_1_rt_assoc" {
+  subnet_id      = aws_subnet.crada_subnet_1.id
+  route_table_id = aws_route_table.crada_public_rt.id
+}
 
-for table in tables_to_process:
-    try:
-        print(f"Processing table: {table}")
-        
-        # Read from source
-        datasource = glueContext.create_dynamic_frame.from_catalog(
-            database=args['source_database'],
-            table_name=table,
-            transformation_ctx=f"datasource_{table}"
-        )
-        
-        if datasource.count() > 0:
-            print(f"Read {datasource.count()} records from {table}")
-            
-            # Apply transformations
-            # This is a placeholder - customize with your specific transformations
-            transformed = ApplyMapping.apply(
-                frame=datasource,
-                mappings=[
-                    # Map source columns to target columns
-                    # Example: ("source_col", "string", "target_col", "string")
-                    # These mappings would be specific to your data model
-                ],
-                transformation_ctx=f"transform_{table}"
-            )
-            
-            # Add audit columns
-            transformed_with_audit = transformed.toDF()
-            transformed_with_audit = transformed_with_audit.withColumn("etl_insert_timestamp", lit(timestamp))
-            transformed_with_audit = transformed_with_audit.withColumn("etl_source", lit("daily_etl"))
-            transformed_with_audit = transformed_with_audit.withColumn("etl_batch_id", lit(f"batch_{year}{month:02d}{day:02d}"))
-            
-            # Convert back to DynamicFrame
-            transformed_with_audit_dyf = DynamicFrame.fromDF(transformed_with_audit, glueContext, f"audit_{table}")
-            
-            # Write to Redshift
-            glueContext.write_dynamic_frame.from_jdbc_conf(
-                frame=transformed_with_audit_dyf,
-                catalog_connection="redshift_connection",
-                connection_options={
-                    "dbtable": f"{args['target_schema']}.{table}",
-                    "database": args['target_database']
-                },
-                redshift_tmp_dir="s3://aws-glue-temporary/",
-                transformation_ctx=f"redshift_sink_{table}"
-            )
-            
-            print(f"Successfully loaded {transformed_with_audit_dyf.count()} records to {args['target_schema']}.{table}")
-        else:
-            print(f"No data found for table {table}")
-    
-    except Exception as e:
-        print(f"Error processing table {table}: {str(e)}")
+resource "aws_route_table_association" "subnet_2_rt_assoc" {
+  subnet_id      = aws_subnet.crada_subnet_2.id
+  route_table_id = aws_route_table.crada_public_rt.id
+}
 
-print(f"Daily ETL job completed at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+# Security Group for Redshift
+resource "aws_security_group" "redshift_sg" {
+  name        = "${var.project_name}-redshift-sg"
+  description = "Security group for Redshift cluster"
+  vpc_id      = aws_vpc.crada_vpc.id
+  
+  ingress {
+    from_port   = 5439
+    to_port     = 5439
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr_block]
+  }
+  
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  
+  tags = {
+    Name        = "${var.project_name}-redshift-sg"
+    Environment = var.environment
+  }
+}
 
-# Job completed
-job.commit()
+# Security Group for Lambda functions
+resource "aws_security_group" "lambda_sg" {
+  name        = "${var.project_name}-lambda-sg"
+  description = "Security group for Lambda functions"
+  vpc_id      = aws_vpc.crada_vpc.id
+  
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  
+  tags = {
+    Name        = "${var.project_name}-lambda-sg"
+    Environment = var.environment
+  }
+}
 
+# Redshift Subnet Group
+resource "aws_redshift_subnet_group" "redshift_subnet_group" {
+  name       = "${var.project_name}-redshift-subnet-group"
+  subnet_ids = [aws_subnet.crada_subnet_1.id, aws_subnet.crada_subnet_2.id]
+  
+  tags = {
+    Name        = "${var.project_name}-redshift-subnet-group"
+    Environment = var.environment
+  }
+}
 
-
-
-
-======
-
-
-import sys
-import datetime
-from awsglue.transforms import *
-from awsglue.utils import getResolvedOptions
-from pyspark.context import SparkContext
-from awsglue.context import GlueContext
-from awsglue.job import Job
-from awsglue.dynamicframe import DynamicFrame
-from pyspark.sql.functions import lit, col, when
-
-# Get job parameters
-args = getResolvedOptions(sys.argv, [
-    'JOB_NAME',
-    'source_database',
-    'target_database',
-    'target_schema',
-    'triggered_by',
-    'timestamp'
-])
-
-# Initialize Spark and Glue contexts
-sc = SparkContext()
-glueContext = GlueContext(sc)
-spark = glueContext.spark_session
-job = Job(glueContext)
-job.init(args['JOB_NAME'], args)
-
-# Metadata for logging and tracking
-trigger_source = args.get('triggered_by', 'unknown')
-event_timestamp = args.get('timestamp', datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-job_run_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-
-print(f"Starting on-demand ETL job at {event_timestamp}, triggered by {trigger_source}")
-
-# For on-demand processing, we might focus on specific tables or a subset of data
-# This example focuses on bed management data as shown in the diagram
-
-try:
-    # Read from source - specific to bed management data
-    bed_data = glueContext.create_dynamic_frame.from_catalog(
-        database=args['source_database'],
-        table_name="bed_management",  # Adjust based on your actual table name
-        push_down_predicate="last_update_date >= (current_date - interval '1' day)",  # Focus on recent data
-        transformation_ctx="source_bed_data"
-    )
-    
-    if bed_data.count() > 0:
-        print(f"Read {bed_data.count()} records from bed_management")
-        
-        # Apply transformations specific to bed management
-        # This transformation would be customized based on your requirements
-        transformed = ApplyMapping.apply(
-            frame=bed_data,
-            mappings=[
-                # Map source columns to target columns
-                # Example mappings specifically for bed management data
-                # ("bed_id", "string", "bed_id", "string"),
-                # ("bed_status", "string", "status", "string"),
-                # ("patient_id", "string", "patient_id", "string"),
-                # ("admission_date", "timestamp", "admission_date", "timestamp"),
-                # ("expected_discharge", "timestamp", "expected_discharge", "timestamp"),
-                # ("department", "string", "department", "string"),
-                # ("bed_type", "string", "bed_type", "string")
-            ],
-            transformation_ctx="transform_bed_data"
-        )
-        
-        # Add operational metrics and audit columns
-        transformed_df = transformed.toDF()
-        transformed_df = transformed_df.withColumn("etl_insert_timestamp", lit(event_timestamp))
-        transformed_df = transformed_df.withColumn("etl_source", lit(f"event_etl_{trigger_source}"))
-        transformed_df = transformed_df.withColumn("etl_batch_id", lit(job_run_id))
-        
-        # Calculate operational metrics
-        # Example: Add bed utilization calculations
-        # transformed_df = transformed_df.withColumn("is_occupied", 
-        #                                          when(col("bed_status") == "occupied", 1).otherwise(0))
-        
-        # Convert back to DynamicFrame
-        final_dyf = DynamicFrame.fromDF(transformed_df, glueContext, "final_bed_data")
-        
-        # Write to Redshift
-        glueContext.write_dynamic_frame.from_jdbc_conf(
-            frame=final_dyf,
-            catalog_connection="redshift_connection",
-            connection_options={
-                "dbtable": f"{args['target_schema']}.operational_bed_data",
-                "database": args['target_database']
-            },
-            redshift_tmp_dir="s3://aws-glue-temporary/",
-            transformation_ctx="redshift_sink_bed_data"
-        )
-        
-        print(f"Successfully loaded {final_dyf.count()} bed management records to Redshift")
-    else:
-        print("No bed management data found for processing")
-
-except Exception as e:
-    print(f"Error processing bed management data: {str(e)}")
-    raise e
-
-print(f"On-demand ETL job completed at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-# Job completed
-job.commit()
 
 
 
@@ -215,85 +136,11 @@ job.commit()
 
 
 
-
-import json
-import os
-import time
-import boto3
-import datetime
-
-# Initialize AWS clients
-glue_client = boto3.client('glue')
-
-def handler(event, context):
-    """Handler for API Gateway requests to trigger ETL workflow"""
-    print(f"Received event: {json.dumps(event)}")
-    
-    # Get environment variables
-    glue_job_name = os.environ.get('GLUE_JOB_NAME')
-    crawler_name = os.environ.get('CRAWLER_NAME')
-    
-    try:
-        # Start the crawler to ensure metadata is up-to-date
-        print(f"Starting crawler: {crawler_name}")
-        glue_client.start_crawler(Name=crawler_name)
-        
-        # Wait briefly for crawler to get started
-        time.sleep(5)
-        
-        # Start the Glue ETL job
-        print(f"Starting Glue job: {glue_job_name}")
-        job_run_response = glue_client.start_job_run(
-            JobName=glue_job_name,
-            Arguments={
-                '--triggered_by': 'lambda',
-                '--timestamp': datetime.datetime.now().isoformat()
-            }
-        )
-        
-        job_run_id = job_run_response['JobRunId']
-        print(f"Job run started: {job_run_id}")
-        
-        return {
-            'statusCode': 200,
-            'body': json.dumps({
-                'message': 'ETL workflow triggered successfully',
-                'jobRunId': job_run_id
-            })
-        }
-    except Exception as e:
-        print(f"Error triggering ETL workflow: {str(e)}")
-        
-        return {
-            'statusCode': 500,
-            'body': json.dumps({
-                'message': 'Error triggering ETL workflow',
-                'error': str(e)
-            })
-        }
-
-def start_glue_job(event, context):
-    """Handler for CloudWatch Events to trigger scheduled ETL"""
-    print(f"Received event from CloudWatch: {json.dumps(event)}")
-    
-    glue_job_name = os.environ.get('DAILY_GLUE_JOB_NAME', 'crada-daily-etl')
-    
-    try:
-        print(f"Starting scheduled Glue job: {glue_job_name}")
-        job_run_response = glue_client.start_job_run(JobName=glue_job_name)
-        
-        job_run_id = job_run_response['JobRunId']
-        print(f"Scheduled job run started: {job_run_id}")
-        
-        return {
-            'statusCode': 200,
-            'jobRunId': job_run_id
-        }
-    except Exception as e:
-        print(f"Error starting scheduled Glue job: {str(e)}")
-        raise e
-
-
+variable "vpc_cidr_block" {
+  description = "CIDR block for the VPC"
+  type        = string
+  default     = "172.25.48.0/20"  # Adjust the subnet mask as needed
+}
 
 
 
@@ -302,862 +149,42 @@ def start_glue_job(event, context):
 ===
 
 
-
-
-#!/bin/bash
-# Deploy script for CRADA ETL infrastructure
-
-set -e
-
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-ROOT_DIR="$( cd "$SCRIPT_DIR/.." &> /dev/null && pwd )"
-
-# Ensure Lambda package is created
-if [ ! -f "$ROOT_DIR/lambda_function_python.zip" ]; then
-    echo "Lambda package not found. Creating it..."
-    "$SCRIPT_DIR/package-lambda.sh"
-fi
-
-# Run Terraform
-cd "$ROOT_DIR/terraform"
-
-echo "Initializing Terraform..."
-terraform init
-
-echo "Planning Terraform deployment..."
-terraform plan -out=tfplan
-
-echo "Applying Terraform changes..."
-terraform apply tfplan
-
-# Get outputs
-echo "Getting infrastructure outputs..."
-terraform output > "$ROOT_DIR/infrastructure_outputs.txt"
-
-echo "Deployment completed successfully!"
-echo "Infrastructure outputs saved to infrastructure_outputs.txt"
-
-# Upload Glue scripts after infrastructure is created
-echo "Uploading Glue ETL scripts to S3..."
-"$SCRIPT_DIR/upload-glue-scripts.sh"
-
-echo "All done! Your ETL infrastructure is ready."
-
-
-
-====
-
-
-#!/bin/bash
-# Script to destroy all AWS resources created by Terraform
-
-set -e
-
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-ROOT_DIR="$( cd "$SCRIPT_DIR/.." &> /dev/null && pwd )"
-
-echo "WARNING: This will destroy all AWS resources created for the CRADA ETL infrastructure."
-echo "This action cannot be undone."
-read -p "Are you sure you want to continue? (y/n): " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]
-then
-    echo "Destruction cancelled."
-    exit 1
-fi
-
-echo "Proceeding with destruction..."
-cd "$ROOT_DIR/terraform"
-terraform destroy -auto-approve
-
-echo "Infrastructure destruction complete."
-
-
-
-
-=====
-
-
-
-#!/bin/bash
-# Package Lambda function for deployment
-
-set -e
-
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-ROOT_DIR="$( cd "$SCRIPT_DIR/.." &> /dev/null && pwd )"
-LAMBDA_DIR="$ROOT_DIR/lambda"
-PACKAGE_DIR="$ROOT_DIR/lambda_package"
-ZIP_FILE="$ROOT_DIR/lambda_function_python.zip"
-
-echo "Packaging Lambda function..."
-
-# Ensure package directory exists and is empty
-rm -rf "$PACKAGE_DIR"
-mkdir -p "$PACKAGE_DIR"
-
-# Copy Lambda code
-cp "$LAMBDA_DIR/lambda_function.py" "$PACKAGE_DIR/"
-
-# Install dependencies
-echo "Installing Lambda dependencies..."
-pip install boto3 -t "$PACKAGE_DIR"
-
-# Create zip file
-echo "Creating Lambda deployment package..."
-cd "$PACKAGE_DIR"
-zip -r "$ZIP_FILE" .
-
-echo "Lambda package created at: $ZIP_FILE"
-
-# Clean up
-rm -rf "$PACKAGE_DIR"
-
-
-
-
-======
-
-
-
-#!/bin/bash
-# Upload Glue ETL scripts to S3
-
-set -e
-
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-ROOT_DIR="$( cd "$SCRIPT_DIR/.." &> /dev/null && pwd )"
-GLUE_SCRIPTS_DIR="$ROOT_DIR/glue/scripts"
-
-# Get S3 bucket name from Terraform outputs
-cd "$ROOT_DIR/terraform"
-S3_BUCKET=$(terraform output -raw s3_staging_bucket_name)
-
-if [ -z "$S3_BUCKET" ]; then
-    echo "Error: Could not determine S3 bucket name from Terraform outputs."
-    echo "Make sure you've deployed the infrastructure first using deploy.sh"
-    exit 1
-fi
-
-echo "Uploading Glue ETL scripts to S3 bucket: $S3_BUCKET"
-
-# Create scripts directory in S3 if it doesn't exist
-aws s3api put-object --bucket "$S3_BUCKET" --key "scripts/" --content-type "application/x-directory"
-
-# Upload daily ETL script
-aws s3 cp "$GLUE_SCRIPTS_DIR/daily_etl_script.py" "s3://$S3_BUCKET/scripts/"
-echo "Uploaded daily_etl_script.py"
-
-# Upload event ETL script
-aws s3 cp "$GLUE_SCRIPTS_DIR/event_etl_script.py" "s3://$S3_BUCKET/scripts/"
-echo "Uploaded event_etl_script.py"
-
-echo "All Glue ETL scripts have been uploaded successfully."
-
-
-
-
-
-========
-
-
-# IAM Role for Glue Services
-resource "aws_iam_role" "glue_role" {
-  name = "${var.project_name}-glue-role"
-  
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "glue.amazonaws.com"
-        }
-      }
-    ]
-  })
-  
-  tags = {
-    Name        = "${var.project_name} Glue Role"
-    Environment = var.environment
-  }
-}
-
-# Attach AWS managed policy for Glue service
-resource "aws_iam_role_policy_attachment" "glue_service" {
-  role       = aws_iam_role.glue_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole"
-}
-
-# Custom policy for Glue to access S3 resources
-resource "aws_iam_policy" "glue_s3_access" {
-  name        = "${var.project_name}-glue-s3-access"
-  description = "Policy for Glue to access S3 resources"
-  
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = [
-          "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject",
-          "s3:ListBucket"
-        ]
-        Effect   = "Allow"
-        Resource = [
-          aws_s3_bucket.staging_bucket.arn,
-          "${aws_s3_bucket.staging_bucket.arn}/*"
-        ]
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "glue_s3_access" {
-  role       = aws_iam_role.glue_role.name
-  policy_arn = aws_iam_policy.glue_s3_access.arn
-}
-
-# Policy for Glue to access Redshift
-resource "aws_iam_policy" "glue_redshift_access" {
-  name        = "${var.project_name}-glue-redshift-access"
-  description = "Policy for Glue to access Redshift"
-  
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = [
-          "redshift:DescribeClusters",
-          "redshift:GetClusterCredentials",
-          "redshift-data:ExecuteStatement",
-          "redshift-data:DescribeStatement",
-          "redshift-data:GetStatementResult",
-          "redshift-data:CancelStatement"
-        ]
-        Effect   = "Allow"
-        Resource = "*"
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "glue_redshift_access" {
-  role       = aws_iam_role.glue_role.name
-  policy_arn = aws_iam_policy.glue_redshift_access.arn
-}
-
-# IAM Role for Lambda Function
-resource "aws_iam_role" "lambda_role" {
-  name = "${var.project_name}-lambda-role"
-  
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-      }
-    ]
-  })
-  
-  tags = {
-    Name        = "${var.project_name} Lambda Role"
-    Environment = var.environment
-  }
-}
-
-# Attach AWS managed policy for Lambda basic execution
-resource "aws_iam_role_policy_attachment" "lambda_basic" {
-  role       = aws_iam_role.lambda_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
-
-# Policy for Lambda to start Glue jobs and crawlers
-resource "aws_iam_policy" "lambda_glue_access" {
-  name        = "${var.project_name}-lambda-glue-access"
-  description = "Policy for Lambda to start Glue jobs and crawlers"
-  
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = [
-          "glue:StartJobRun",
-          "glue:GetJobRun",
-          "glue:GetJobRuns",
-          "glue:BatchStopJobRun",
-          "glue:StartCrawler",
-          "glue:GetCrawler"
-        ]
-        Effect   = "Allow"
-        Resource = "*"
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "lambda_glue_access" {
-  role       = aws_iam_role.lambda_role.name
-  policy_arn = aws_iam_policy.lambda_glue_access.arn
-}
-
-# IAM Role for CloudWatch Events
-resource "aws_iam_role" "events_role" {
-  name = "${var.project_name}-events-role"
-  
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "events.amazonaws.com"
-        }
-      }
-    ]
-  })
-  
-  tags = {
-    Name        = "${var.project_name} Events Role"
-    Environment = var.environment
-  }
-}
-
-# Policy for CloudWatch Events to start Glue jobs
-resource "aws_iam_policy" "events_glue_access" {
-  name        = "${var.project_name}-events-glue-access"
-  description = "Policy for CloudWatch Events to start Glue jobs"
-  
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = [
-          "glue:StartJobRun"
-        ]
-        Effect   = "Allow"
-        Resource = "arn:aws:glue:${var.aws_region}:${data.aws_caller_identity.current.account_id}:job/${aws_glue_job.daily_etl_job.name}"
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "events_glue_access" {
-  role       = aws_iam_role.events_role.name
-  policy_arn = aws_iam_policy.events_glue_access.arn
-}
-
-
-
-
-=========
-
-
-
-provider "aws" {
-  region = var.aws_region
-}
-
-# S3 bucket for data staging
-resource "aws_s3_bucket" "staging_bucket" {
-  bucket = "${var.project_name}-staging-bucket"
-  
-  tags = {
-    Name        = "${var.project_name} Staging Bucket"
-    Environment = var.environment
-  }
-}
-
-resource "aws_s3_bucket_versioning" "staging_bucket_versioning" {
-  bucket = aws_s3_bucket.staging_bucket.id
-  
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-# Glue Catalog Database
-resource "aws_glue_catalog_database" "glue_database" {
-  name        = "${var.project_name}_catalog_db"
-  description = "Database for ${var.project_name} ETL metadata"
-}
-
-# Glue Crawler - Daily Scheduled
-resource "aws_glue_crawler" "daily_crawler" {
-  name          = "${var.project_name}-daily-crawler"
-  database_name = aws_glue_catalog_database.glue_database.name
-  role          = aws_iam_role.glue_role.arn
-  
-  s3_target {
-    path = "s3://${aws_s3_bucket.staging_bucket.bucket}"
-  }
-  
-  schedule = "cron(0 1 * * ? *)"  # Run daily at 1 AM UTC
-  
-  tags = {
-    Name        = "${var.project_name} Daily Crawler"
-    Environment = var.environment
-  }
-}
-
-# Glue Crawler - On-Demand (Event Triggered)
-resource "aws_glue_crawler" "event_crawler" {
-  name          = "${var.project_name}-event-crawler"
-  database_name = aws_glue_catalog_database.glue_database.name
-  role          = aws_iam_role.glue_role.arn
-  
-  s3_target {
-    path = "s3://${aws_s3_bucket.staging_bucket.bucket}"
-  }
-  
-  tags = {
-    Name        = "${var.project_name} Event Crawler"
-    Environment = var.environment
-  }
-}
-
-# Glue ETL Job for Data Processing (Daily)
-resource "aws_glue_job" "daily_etl_job" {
-  name              = "${var.project_name}-daily-etl"
-  role_arn          = aws_iam_role.glue_role.arn
-  glue_version      = "3.0"
-  worker_type       = "G.1X"
-  number_of_workers = 2
-  
-  command {
-    script_location = "s3://${aws_s3_bucket.staging_bucket.bucket}/scripts/daily_etl_script.py"
-    python_version  = "3"
-  }
-  
-  default_arguments = {
-    "--job-language"                     = "python"
-    "--TempDir"                          = "s3://${aws_s3_bucket.staging_bucket.bucket}/temp/"
-    "--enable-metrics"                   = "true"
-    "--enable-continuous-cloudwatch-log" = "true"
-    "--source_database"                  = "mhs_genesis"
-    "--target_database"                  = var.redshift_database
-    "--target_schema"                    = var.redshift_schema
-  }
-  
-  execution_property {
-    max_concurrent_runs = 1
-  }
-  
-  tags = {
-    Name        = "${var.project_name} Daily ETL Job"
-    Environment = var.environment
-  }
-}
-
-# Glue ETL Job for Data Processing (On-Demand)
-resource "aws_glue_job" "event_etl_job" {
-  name              = "${var.project_name}-event-etl"
-  role_arn          = aws_iam_role.glue_role.arn
-  glue_version      = "3.0"
-  worker_type       = "G.1X"
-  number_of_workers = 2
-  
-  command {
-    script_location = "s3://${aws_s3_bucket.staging_bucket.bucket}/scripts/event_etl_script.py"
-    python_version  = "3"
-  }
-  
-  default_arguments = {
-    "--job-language"                     = "python"
-    "--TempDir"                          = "s3://${aws_s3_bucket.staging_bucket.bucket}/temp/"
-    "--enable-metrics"                   = "true"
-    "--enable-continuous-cloudwatch-log" = "true"
-    "--source_database"                  = "mhs_genesis"
-    "--target_database"                  = var.redshift_database
-    "--target_schema"                    = var.redshift_schema
-  }
-  
-  execution_property {
-    max_concurrent_runs = 2  # Allow concurrent runs for on-demand jobs
-  }
-  
-  tags = {
-    Name        = "${var.project_name} Event ETL Job"
-    Environment = var.environment
-  }
-}
-
-# Lambda Function for API/Event Triggering (On-Demand)
-resource "aws_lambda_function" "etl_trigger" {
-  function_name    = "${var.project_name}-etl-trigger"
-  filename         = "../lambda_function_python.zip"
-  source_code_hash = filebase64sha256("../lambda_function_python.zip")
-  role             = aws_iam_role.lambda_role.arn
-  handler          = "lambda_function.handler" 
-  runtime          = "python3.9"                
-  timeout          = 60
-  
-  environment {
-    variables = {
-      GLUE_JOB_NAME = aws_glue_job.event_etl_job.name,
-      CRAWLER_NAME  = aws_glue_crawler.event_crawler.name
-    }
-  }
-  
-  tags = {
-    Name        = "${var.project_name} ETL Trigger"
-    Environment = var.environment
-  }
-}
-
-# Lambda Function for scheduled ETL jobs
-resource "aws_lambda_function" "scheduled_etl_trigger" {
-  function_name    = "${var.project_name}-scheduled-etl-trigger"
-  filename         = "../lambda_function_python.zip"
-  source_code_hash = filebase64sha256("../lambda_function_python.zip")
-  role             = aws_iam_role.lambda_role.arn
-  handler          = "lambda_function.start_glue_job"  # Python handler
-  runtime          = "python3.9"                       # Python runtime
-  timeout          = 30
-  
-  environment {
-    variables = {
-      DAILY_GLUE_JOB_NAME = aws_glue_job.daily_etl_job.name
-    }
-  }
-  
-  tags = {
-    Name        = "${var.project_name} Scheduled ETL Trigger"
-    Environment = var.environment
-  }
-}
-
-# CloudWatch Event Rule for Daily ETL Job Trigger
-resource "aws_cloudwatch_event_rule" "daily_etl_trigger" {
-  name                = "${var.project_name}-daily-etl-trigger"
-  description         = "Triggers the daily ETL job"
-  schedule_expression = "cron(0 2 * * ? *)"  # Run daily at 2 AM UTC
-  
-  tags = {
-    Name        = "${var.project_name} Daily ETL Trigger"
-    Environment = var.environment
-  }
-}
-
-# CloudWatch Event Target points to the Lambda
-resource "aws_cloudwatch_event_target" "daily_etl_job_target" {
-  rule      = aws_cloudwatch_event_rule.daily_etl_trigger.name
-  target_id = "TriggerGlueJob"
-  arn       = aws_lambda_function.scheduled_etl_trigger.arn
-}
-
-# Lambda permission for CloudWatch Events
-resource "aws_lambda_permission" "allow_cloudwatch_to_call_scheduled_lambda" {
-  statement_id  = "AllowExecutionFromCloudWatch"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.scheduled_etl_trigger.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.daily_etl_trigger.arn
-}
-
-# API Gateway for HTTP trigger
-resource "aws_apigatewayv2_api" "etl_api" {
-  name          = "${var.project_name}-etl-api"
-  protocol_type = "HTTP"
-  
-  tags = {
-    Name        = "${var.project_name} ETL API"
-    Environment = var.environment
-  }
-}
-
-resource "aws_apigatewayv2_integration" "lambda_integration" {
-  api_id           = aws_apigatewayv2_api.etl_api.id
-  integration_type = "AWS_PROXY"
-  
-  integration_uri    = aws_lambda_function.etl_trigger.invoke_arn
-  integration_method = "POST"
-  payload_format_version = "2.0"
-}
-
-resource "aws_apigatewayv2_route" "lambda_route" {
-  api_id    = aws_apigatewayv2_api.etl_api.id
-  route_key = "POST /trigger-etl"
-  target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
-}
-
-resource "aws_apigatewayv2_stage" "default" {
-  api_id      = aws_apigatewayv2_api.etl_api.id
-  name        = "$default"
-  auto_deploy = true
-}
-
-resource "aws_lambda_permission" "api_gw" {
-  statement_id  = "AllowExecutionFromAPIGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.etl_trigger.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${aws_apigatewayv2_api.etl_api.execution_arn}/*/*/trigger-etl"
-}
-
-# Redshift Cluster for Data Product
 resource "aws_redshift_cluster" "data_product" {
-  cluster_identifier        = "${var.project_name}-data-product"
-  database_name             = var.redshift_database
-  master_username           = var.redshift_username
-  master_password           = var.redshift_password
-  node_type                 = var.redshift_node_type
-  cluster_type              = var.redshift_node_count > 1 ? "multi-node" : "single-node"
-  number_of_nodes           = var.redshift_node_count > 1 ? var.redshift_node_count : null
-  skip_final_snapshot       = var.environment != "production"
-  automated_snapshot_retention_period = var.environment == "production" ? 7 : 1
+  # ... existing configuration ...
   
-  tags = {
-    Name        = "${var.project_name} Data Product"
-    Environment = var.environment
-  }
-}
-
-# Current AWS account ID
-data "aws_caller_identity" "current" {}
-
-
-
-
-=======
-
-
-
-output "s3_staging_bucket_name" {
-  description = "The name of the S3 staging bucket"
-  value       = aws_s3_bucket.staging_bucket.bucket
-}
-
-output "s3_staging_bucket_arn" {
-  description = "The ARN of the S3 staging bucket"
-  value       = aws_s3_bucket.staging_bucket.arn
-}
-
-output "glue_database_name" {
-  description = "The name of the Glue catalog database"
-  value       = aws_glue_catalog_database.glue_database.name
-}
-
-output "daily_crawler_name" {
-  description = "The name of the daily Glue crawler"
-  value       = aws_glue_crawler.daily_crawler.name
-}
-
-output "event_crawler_name" {
-  description = "The name of the event-triggered Glue crawler"
-  value       = aws_glue_crawler.event_crawler.name
-}
-
-output "daily_etl_job_name" {
-  description = "The name of the daily ETL Glue job"
-  value       = aws_glue_job.daily_etl_job.name
-}
-
-output "event_etl_job_name" {
-  description = "The name of the event-triggered ETL Glue job"
-  value       = aws_glue_job.event_etl_job.name
-}
-
-output "lambda_function_name" {
-  description = "The name of the Lambda function for ETL triggering"
-  value       = aws_lambda_function.etl_trigger.function_name
-}
-
-output "lambda_function_arn" {
-  description = "The ARN of the Lambda function for ETL triggering"
-  value       = aws_lambda_function.etl_trigger.arn
-}
-
-output "scheduled_lambda_function_name" {
-  description = "The name of the Lambda function for scheduled ETL triggering"
-  value       = aws_lambda_function.scheduled_etl_trigger.function_name
-}
-
-output "scheduled_lambda_function_arn" {
-  description = "The ARN of the Lambda function for scheduled ETL triggering"
-  value       = aws_lambda_function.scheduled_etl_trigger.arn
-}
-
-output "api_endpoint" {
-  description = "The endpoint URL for the ETL API"
-  value       = "${aws_apigatewayv2_api.etl_api.api_endpoint}/trigger-etl"
-}
-
-output "redshift_cluster_endpoint" {
-  description = "The endpoint for the Redshift cluster"
-  value       = aws_redshift_cluster.data_product.endpoint
-}
-
-output "redshift_cluster_jdbc_url" {
-  description = "The JDBC URL for connecting to the Redshift cluster"
-  value       = "jdbc:redshift://${aws_redshift_cluster.data_product.endpoint}/${aws_redshift_cluster.data_product.database_name}"
-}
-
-
-
-
-
-========
-
-
-aws_region         = "us-east-1"
-project_name       = "crada"
-environment        = "dev"
-
-# Redshift configuration
-redshift_database  = "dataproduct"
-redshift_schema    = "etl_data"
-redshift_username  = "admin"
-redshift_password  = xxxx
-redshift_node_type = "dc2.large"
-redshift_node_count = 2
-
-# Additional tags
-tags = {
-  Owner       = "FoundryTeam"
-  Project     = "ETL Orchestration"
-  CostCenter  = "IT-123"
-}
-
-
-
-
-======
-
-
-
-variable "aws_region" {
-  description = "The AWS region to deploy resources"
-  type        = string
-  default     = "us-east-1"
-}
-
-variable "project_name" {
-  description = "The name of the project, used for naming resources"
-  type        = string
-  default     = "crada"
-}
-
-variable "environment" {
-  description = "The deployment environment (dev, staging, production)"
-  type        = string
-  default     = "dev"
+  cluster_subnet_group_name = aws_redshift_subnet_group.redshift_subnet_group.name
+  vpc_security_group_ids    = [aws_security_group.redshift_sg.id]
   
-  validation {
-    condition     = contains(["dev", "staging", "production"], var.environment)
-    error_message = "The environment must be one of: dev, staging, production."
-  }
+  # ... rest of configuration ...
 }
 
-variable "redshift_database" {
-  description = "The name of the Redshift database"
-  type        = string
-  default     = "dataproduct"
-}
 
-variable "redshift_schema" {
-  description = "The schema in the Redshift database for ETL output"
-  type        = string
-  default     = "etl_data"
-}
 
-variable "redshift_username" {
-  description = "The username for the Redshift database"
-  type        = string
-  default     = "admin"
-  sensitive   = true
-}
+===
 
-variable "redshift_password" {
-  description = "The password for the Redshift database"
-  type        = string
-  sensitive   = true
-}
 
-variable "redshift_node_type" {
-  description = "The node type for the Redshift cluster"
-  type        = string
-  default     = "dc2.large"
-}
 
-variable "redshift_node_count" {
-  description = "The number of nodes in the Redshift cluster"
-  type        = number
-  default     = 2
+resource "aws_lambda_function" "etl_trigger" {
+  # ... existing configuration ...
   
-  validation {
-    condition     = var.redshift_node_count >= 1
-    error_message = "The number of nodes must be at least 1."
+  vpc_config {
+    subnet_ids         = [aws_subnet.crada_subnet_1.id, aws_subnet.crada_subnet_2.id]
+    security_group_ids = [aws_security_group.lambda_sg.id]
   }
+  
+  # ... rest of configuration ...
 }
 
-variable "tags" {
-  description = "Additional tags for all resources"
-  type        = map(string)
-  default     = {}
+resource "aws_lambda_function" "scheduled_etl_trigger" {
+  # ... existing configuration ...
+  
+  vpc_config {
+    subnet_ids         = [aws_subnet.crada_subnet_1.id, aws_subnet.crada_subnet_2.id]
+    security_group_ids = [aws_security_group.lambda_sg.id]
+  }
+  
+  # ... rest of configuration ...
 }
 
 
 
-
-
-
-
-======
-
-
-# Terraform files
-.terraform/
-.terraform.lock.hcl
-terraform.tfstate
-terraform.tfstate.backup
-terraform.tfvars
-*.tfplan
-
-# Lambda deployment packages
-*.zip
-
-# Python virtual environment
-venv/
-env/
-.env/
-.venv/
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# IDE files
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# Logs
-*.log
-logs/
