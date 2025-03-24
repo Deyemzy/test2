@@ -1,148 +1,27 @@
-# VPC for CRADA project
-resource "aws_vpc" "crada_vpc" {
-  cidr_block           = var.vpc_cidr_block
-  enable_dns_support   = true
-  enable_dns_hostnames = true
-  
-  tags = {
-    Name        = "${var.project_name}-vpc"
-    Environment = var.environment
-  }
+# Add EC2 network interface permissions to Lambda role
+resource "aws_iam_policy" "lambda_vpc_access" {
+  name        = "${var.project_name}-lambda-vpc-access"
+  description = "IAM policy for Lambda VPC access"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "ec2:CreateNetworkInterface",
+          "ec2:DescribeNetworkInterfaces",
+          "ec2:DeleteNetworkInterface",
+          "ec2:AssignPrivateIpAddresses",
+          "ec2:UnassignPrivateIpAddresses"
+        ],
+        Effect   = "Allow",
+        Resource = "*"
+      }
+    ]
+  })
 }
 
-# Create two subnets in different availability zones
-resource "aws_subnet" "crada_subnet_1" {
-  vpc_id                  = aws_vpc.crada_vpc.id
-  cidr_block              = cidrsubnet(var.vpc_cidr_block, 1, 0)  # 172.25.52.0/25
-  availability_zone       = "${var.aws_region}a"
-  map_public_ip_on_launch = false  # Changed to false for private subnet
-  
-  tags = {
-    Name        = "${var.project_name}-subnet-1"
-    Environment = var.environment
-  }
-}
-
-resource "aws_subnet" "crada_subnet_2" {
-  vpc_id                  = aws_vpc.crada_vpc.id
-  cidr_block              = cidrsubnet(var.vpc_cidr_block, 1, 1)  # 172.25.52.128/25
-  availability_zone       = "${var.aws_region}b"
-  map_public_ip_on_launch = false  # Changed to false for private subnet
-  
-  tags = {
-    Name        = "${var.project_name}-subnet-2"
-    Environment = var.environment
-  }
-}
-
-# Route Table for private network
-resource "aws_route_table" "crada_private_rt" {
-  vpc_id = aws_vpc.crada_vpc.id
-  
-  tags = {
-    Name        = "${var.project_name}-private-rt"
-    Environment = var.environment
-  }
-}
-
-# Associate Route Table with Subnets
-resource "aws_route_table_association" "subnet_1_rt_assoc" {
-  subnet_id      = aws_subnet.crada_subnet_1.id
-  route_table_id = aws_route_table.crada_private_rt.id
-}
-
-resource "aws_route_table_association" "subnet_2_rt_assoc" {
-  subnet_id      = aws_subnet.crada_subnet_2.id
-  route_table_id = aws_route_table.crada_private_rt.id
-}
-
-# Security Group for Redshift
-resource "aws_security_group" "redshift_sg" {
-  name        = "${var.project_name}-redshift-sg"
-  description = "Security group for Redshift cluster"
-  vpc_id      = aws_vpc.crada_vpc.id
-  
-  ingress {
-    from_port   = 5439
-    to_port     = 5439
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr_block]
-  }
-  
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = [var.vpc_cidr_block]  # Limit egress to VPC only
-  }
-  
-  tags = {
-    Name        = "${var.project_name}-redshift-sg"
-    Environment = var.environment
-  }
-}
-
-# Security Group for Lambda functions
-resource "aws_security_group" "lambda_sg" {
-  name        = "${var.project_name}-lambda-sg"
-  description = "Security group for Lambda functions"
-  vpc_id      = aws_vpc.crada_vpc.id
-  
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = [var.vpc_cidr_block]  # Limit egress to VPC only
-  }
-  
-  tags = {
-    Name        = "${var.project_name}-lambda-sg"
-    Environment = var.environment
-  }
-}
-
-# Redshift Subnet Group
-resource "aws_redshift_subnet_group" "redshift_subnet_group" {
-  name       = "${var.project_name}-redshift-subnet-group"
-  subnet_ids = [aws_subnet.crada_subnet_1.id, aws_subnet.crada_subnet_2.id]
-  
-  tags = {
-    Name        = "${var.project_name}-redshift-subnet-group"
-    Environment = var.environment
-  }
-}
-
-
-
-===
-
-# VPC Endpoint for S3
-resource "aws_vpc_endpoint" "s3" {
-  vpc_id            = aws_vpc.crada_vpc.id
-  service_name      = "com.amazonaws.${var.aws_region}.s3"
-  vpc_endpoint_type = "Gateway"
-  route_table_ids   = [aws_route_table.crada_private_rt.id]
-  
-  tags = {
-    Name        = "${var.project_name}-s3-endpoint"
-    Environment = var.environment
-  }
-}
-
-
-===
-
-# VPC Endpoint for Glue
-resource "aws_vpc_endpoint" "glue" {
-  vpc_id              = aws_vpc.crada_vpc.id
-  service_name        = "com.amazonaws.${var.aws_region}.glue"
-  vpc_endpoint_type   = "Interface"
-  subnet_ids          = [aws_subnet.crada_subnet_1.id, aws_subnet.crada_subnet_2.id]
-  security_group_ids  = [aws_security_group.lambda_sg.id]
-  private_dns_enabled = true
-  
-  tags = {
-    Name        = "${var.project_name}-glue-endpoint"
-    Environment = var.environment
-  }
+resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
+  role       = aws_iam_role.lambda_role.name
+  policy_arn = aws_iam_policy.lambda_vpc_access.arn
 }
