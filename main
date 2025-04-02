@@ -23,7 +23,11 @@ var directory = filePath.getParent();
 var newFilePath = new java.io.File(directory, newFileName);
 
 // Rename the file
-filePath.renameTo(newFilePath);
+var success = filePath.renameTo(newFilePath);
 
 // Log the filename change
-logger.info("File renamed from " + fileName + " to " + newFileName);
+if (success) {
+    logger.info("File renamed from " + fileName + " to " + newFileName);
+} else {
+    logger.error("Failed to rename file from " + fileName + " to " + newFileName);
+}
