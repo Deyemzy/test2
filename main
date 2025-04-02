@@ -1,26 +1,22 @@
-// Get the file name and file extension
-set fileName "${Name}"
-set fileDir "${FileParentDirectory}"
-set filePath "${File}"
+// Get the full file path
+set fullPath "${File}"
 
-// Find the position of the last period (for the extension)
-prompt lastDotPos "${fileName.lastIndexOf('.')}"
+// Extract just the filename from the path
+set fileName "${fullPath##*/}"
 
-// Check if there is an extension
-if ${lastDotPos} > 0
-  // Split the filename into base and extension
-  prompt baseName "${fileName.substring(0, lastDotPos)}"
-  prompt extension "${fileName.substring(lastDotPos)}"
-  
-  // Create the new filename with "_processed" appended
-  set newFileName "${baseName}_processed${extension}"
-else
-  // No extension, just append "_processed"
-  set newFileName "${fileName}_processed"
-endif
+// Get the parent directory
+set parentDir "${FileParentDirectory}"
 
-// Rename the file using the lrename command
-lrename "${filePath}" "${fileDir}/${newFileName}"
+// Find the position of the last dot in the filename
+set lastDot "${fileName.lastIndexOf('.')}"
+
+// Create the new filename with _processed before the extension
+set baseName "${fileName.substring(0, lastDot)}"
+set extension "${fileName.substring(lastDot)}"
+set newName "${baseName}_processed${extension}"
+
+// Rename the file
+lrename "${fullPath}" "${parentDir}/${newName}"
 
 // Log the action
-msg "Renamed file ${fileName} to ${newFileName}"
+msg "File renamed from ${fileName} to ${newName}"
