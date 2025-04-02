@@ -1,45 +1,29 @@
-# Add this to your 02_filters.conf section
-<filter aap.**>
-  @type parser
-  key_name log
-  <parse>
-    @type json
-    time_key timestamp
-    time_format %Y-%m-%dT%H:%M:%S.%L%z
-  </parse>
-  reserve_data true
-</filter>
+// Get the current filename from the event
+var filePath = event.getPath();
+var fileName = filePath.getName();
 
-<match aap.**>
-  @type relabel
-  @label @AAP
-</match>
+// Split the filename to get the base name and extension
+var lastDotIndex = fileName.lastIndexOf(".");
+var baseName = "";
+var extension = "";
 
-<label @AAP>
-  <filter **>
-    @type record_transformer
-    <record>
-      source aap
-      app aap
-    </record>
-  </filter>
-  
-  <match **>
-    @type copy
-    <store>
-      @type loki
-      url "http://loki-gateway.monitor.svc"
-      line_format json
-      <label>
-        app
-        source
-        namespace
-        level
-      </label>
-      <buffer>
-        flush_interval 10s
-        flush_at_shutdown true
-      </buffer>
-    </store>
-  </match>
-</label>
+if (lastDotIndex > 0) {
+    baseName = fileName.substring(0, lastDotIndex);
+    extension = fileName.substring(lastDotIndex);
+} else {
+    baseName = fileName;
+    extension = "";
+}
+
+// Create the new filename with "_processed" appended
+var newFileName = baseName + "_processed" + extension;
+
+// Create the full path for the new file
+var directory = filePath.getParent();
+var newFilePath = new java.io.File(directory, newFileName);
+
+// Rename the file
+filePath.renameTo(newFilePath);
+
+// Log the filename change
+logger.info("File renamed from " + fileName + " to " + newFileName);
