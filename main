@@ -1,33 +1,26 @@
-// Get the current filename from the event
-var filePath = event.getPath();
-var fileName = filePath.getName();
+// Get the file name and file extension
+set fileName "${Name}"
+set fileDir "${FileParentDirectory}"
+set filePath "${File}"
 
-// Split the filename to get the base name and extension
-var lastDotIndex = fileName.lastIndexOf(".");
-var baseName = "";
-var extension = "";
+// Find the position of the last period (for the extension)
+prompt lastDotPos "${fileName.lastIndexOf('.')}"
 
-if (lastDotIndex > 0) {
-    baseName = fileName.substring(0, lastDotIndex);
-    extension = fileName.substring(lastDotIndex);
-} else {
-    baseName = fileName;
-    extension = "";
-}
+// Check if there is an extension
+if ${lastDotPos} > 0
+  // Split the filename into base and extension
+  prompt baseName "${fileName.substring(0, lastDotPos)}"
+  prompt extension "${fileName.substring(lastDotPos)}"
+  
+  // Create the new filename with "_processed" appended
+  set newFileName "${baseName}_processed${extension}"
+else
+  // No extension, just append "_processed"
+  set newFileName "${fileName}_processed"
+endif
 
-// Create the new filename with "_processed" appended
-var newFileName = baseName + "_processed" + extension;
+// Rename the file using the lrename command
+lrename "${filePath}" "${fileDir}/${newFileName}"
 
-// Create the full path for the new file
-var directory = filePath.getParent();
-var newFilePath = new java.io.File(directory, newFileName);
-
-// Rename the file
-var success = filePath.renameTo(newFilePath);
-
-// Log the filename change
-if (success) {
-    logger.info("File renamed from " + fileName + " to " + newFileName);
-} else {
-    logger.error("Failed to rename file from " + fileName + " to " + newFileName);
-}
+// Log the action
+msg "Renamed file ${fileName} to ${newFileName}"
