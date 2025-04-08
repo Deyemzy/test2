@@ -1,3 +1,703 @@
+provider "aws" {
+  region = var.aws_region
+}
+
+# S3 bucket for data staging
+resource "aws_s3_bucket" "staging_bucket" {
+  bucket = "${var.project_name}-staging-bucket"
+  
+  tags = {
+    Name        = "${var.project_name} Staging Bucket"
+    Environment = var.environment
+  }
+}
+
+resource "aws_s3_bucket_versioning" "staging_bucket_versioning" {
+  bucket = aws_s3_bucket.staging_bucket.id
+  
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+# Glue Catalog Database
+resource "aws_glue_catalog_database" "glue_database" {
+  name        = "${var.project_name}_catalog_db"
+  description = "Database for ${var.project_name} ETL metadata"
+}
+
+# Glue Crawler - Daily Scheduled
+resource "aws_glue_crawler" "daily_crawler" {
+  name          = "${var.project_name}-daily-crawler"
+  database_name = aws_glue_catalog_database.glue_database.name
+  role          = aws_iam_role.glue_role.arn
+  
+  s3_target {
+    path = "s3://${aws_s3_bucket.staging_bucket.bucket}"
+  }
+  
+  schedule = "cron(0 1 * * ? *)"  # Run daily at 1 AM UTC
+  
+  tags = {
+    Name        = "${var.project_name} Daily Crawler"
+    Environment = var.environment
+  }
+}
+
+# Glue Crawler - On-Demand (Event Triggered)
+resource "aws_glue_crawler" "event_crawler" {
+  name          = "${var.project_name}-event-crawler"
+  database_name = aws_glue_catalog_database.glue_database.name
+  role          = aws_iam_role.glue_role.arn
+  
+  s3_target {
+    path = "s3://${aws_s3_bucket.staging_bucket.bucket}"
+  }
+  
+  tags = {
+    Name        = "${var.project_name} Event Crawler"
+    Environment = var.environment
+  }
+}
+
+# Glue ETL Job for Data Processing (Daily)
+resource "aws_glue_job" "daily_etl_job" {
+  name              = "${var.project_name}-daily-etl"
+  role_arn          = aws_iam_role.glue_role.arn
+  glue_version      = "3.0"
+  worker_type       = "G.1X"
+  number_of_workers = 2
+  
+  command {
+    script_location = "s3://${aws_s3_bucket.staging_bucket.bucket}/scripts/daily_etl_script.py"
+    python_version  = "3"
+  }
+  
+  default_arguments = {
+    "--job-language"                     = "python"
+    "--TempDir"                          = "s3://${aws_s3_bucket.staging_bucket.bucket}/temp/"
+    "--enable-metrics"                   = "true"
+    "--enable-continuous-cloudwatch-log" = "true"
+    "--source_database"                  = "mhs_genesis"
+    "--target_database"                  = var.redshift_database
+    "--target_schema"                    = var.redshift_schema
+  }
+  
+  execution_property {
+    max_concurrent_runs = 1
+  }
+  
+  tags = {
+    Name        = "${var.project_name} Daily ETL Job"
+    Environment = var.environment
+  }
+}
+
+# Glue ETL Job for Data Processing (On-Demand)
+resource "aws_glue_job" "event_etl_job" {
+  name              = "${var.project_name}-event-etl"
+  role_arn          = aws_iam_role.glue_role.arn
+  glue_version      = "3.0"
+  worker_type       = "G.1X"
+  number_of_workers = 2
+  
+  command {
+    script_location = "s3://${aws_s3_bucket.staging_bucket.bucket}/scripts/event_etl_script.py"
+    python_version  = "3"
+  }
+  
+  default_arguments = {
+    "--job-language"                     = "python"
+    "--TempDir"                          = "s3://${aws_s3_bucket.staging_bucket.bucket}/temp/"
+    "--enable-metrics"                   = "true"
+    "--enable-continuous-cloudwatch-log" = "true"
+    "--source_database"                  = "mhs_genesis"
+    "--target_database"                  = var.redshift_database
+    "--target_schema"                    = var.redshift_schema
+  }
+  
+  execution_property {
+    max_concurrent_runs = 2  # Allow concurrent runs for on-demand jobs
+  }
+  
+  tags = {
+    Name        = "${var.project_name} Event ETL Job"
+    Environment = var.environment
+  }
+}
+
+# Lambda Function for API/Event Triggering (On-Demand)
+resource "aws_lambda_function" "etl_trigger" {
+  function_name    = "${var.project_name}-etl-trigger"
+  filename         = "../lambda_function_python.zip"
+  source_code_hash = filebase64sha256("../lambda_function_python.zip")
+  role             = aws_iam_role.lambda_role.arn
+  handler          = "lambda_function.handler" 
+  runtime          = "python3.9"                
+  timeout          = 60
+  
+  environment {
+    variables = {
+      GLUE_JOB_NAME = aws_glue_job.event_etl_job.name,
+      CRAWLER_NAME  = aws_glue_crawler.event_crawler.name
+    }
+  }
+  
+  tags = {
+    Name        = "${var.project_name} ETL Trigger"
+    Environment = var.environment
+  }
+}
+
+# Lambda Function for scheduled ETL jobs
+resource "aws_lambda_function" "scheduled_etl_trigger" {
+  function_name    = "${var.project_name}-scheduled-etl-trigger"
+  filename         = "../lambda_function_python.zip"
+  source_code_hash = filebase64sha256("../lambda_function_python.zip")
+  role             = aws_iam_role.lambda_role.arn
+  handler          = "lambda_function.start_glue_job"  # Python handler
+  runtime          = "python3.9"                       # Python runtime
+  timeout          = 30
+  
+  environment {
+    variables = {
+      DAILY_GLUE_JOB_NAME = aws_glue_job.daily_etl_job.name
+    }
+  }
+  
+  tags = {
+    Name        = "${var.project_name} Scheduled ETL Trigger"
+    Environment = var.environment
+  }
+}
+
+# CloudWatch Event Rule for Daily ETL Job Trigger
+resource "aws_cloudwatch_event_rule" "daily_etl_trigger" {
+  name                = "${var.project_name}-daily-etl-trigger"
+  description         = "Triggers the daily ETL job"
+  schedule_expression = "cron(0 2 * * ? *)"  # Run daily at 2 AM UTC
+  
+  tags = {
+    Name        = "${var.project_name} Daily ETL Trigger"
+    Environment = var.environment
+  }
+}
+
+# CloudWatch Event Target points to the Lambda
+resource "aws_cloudwatch_event_target" "daily_etl_job_target" {
+  rule      = aws_cloudwatch_event_rule.daily_etl_trigger.name
+  target_id = "TriggerGlueJob"
+  arn       = aws_lambda_function.scheduled_etl_trigger.arn
+}
+
+# Lambda permission for CloudWatch Events
+resource "aws_lambda_permission" "allow_cloudwatch_to_call_scheduled_lambda" {
+  statement_id  = "AllowExecutionFromCloudWatch"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.scheduled_etl_trigger.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.daily_etl_trigger.arn
+}
+
+# API Gateway for HTTP trigger
+resource "aws_apigatewayv2_api" "etl_api" {
+  name          = "${var.project_name}-etl-api"
+  protocol_type = "HTTP"
+  
+  tags = {
+    Name        = "${var.project_name} ETL API"
+    Environment = var.environment
+  }
+}
+
+resource "aws_apigatewayv2_integration" "lambda_integration" {
+  api_id           = aws_apigatewayv2_api.etl_api.id
+  integration_type = "AWS_PROXY"
+  
+  integration_uri    = aws_lambda_function.etl_trigger.invoke_arn
+  integration_method = "POST"
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "lambda_route" {
+  api_id    = aws_apigatewayv2_api.etl_api.id
+  route_key = "POST /trigger-etl"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
+}
+
+resource "aws_apigatewayv2_stage" "default" {
+  api_id      = aws_apigatewayv2_api.etl_api.id
+  name        = "$default"
+  auto_deploy = true
+}
+
+resource "aws_lambda_permission" "api_gw" {
+  statement_id  = "AllowExecutionFromAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.etl_trigger.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.etl_api.execution_arn}/*/*/trigger-etl"
+}
+
+# Redshift Cluster for Data Product
+resource "aws_redshift_cluster" "data_product" {
+  cluster_identifier        = "${var.project_name}-data-product"
+  database_name             = var.redshift_database
+  master_username           = var.redshift_username
+  master_password           = var.redshift_password
+  node_type                 = var.redshift_node_type
+  cluster_type              = var.redshift_node_count > 1 ? "multi-node" : "single-node"
+  number_of_nodes           = var.redshift_node_count > 1 ? var.redshift_node_count : null
+  skip_final_snapshot       = var.environment != "production"
+  automated_snapshot_retention_period = var.environment == "production" ? 7 : 1
+  
+  tags = {
+    Name        = "${var.project_name} Data Product"
+    Environment = var.environment
+  }
+}
+
+# Current AWS account ID
+data "aws_caller_identity" "current" {}
+
+# =================== TABLEAU SERVER CONFIGURATION ===================
+
+# Tableau Server EC2 Instance
+resource "aws_instance" "tableau_server" {
+  ami                    = var.tableau_ami_id
+  instance_type          = var.tableau_instance_type
+  subnet_id              = var.tableau_subnet_id
+  vpc_security_group_ids = [aws_security_group.tableau_sg.id]
+  key_name               = var.key_pair_name
+  iam_instance_profile   = aws_iam_instance_profile.tableau_instance_profile.name
+  
+  root_block_device {
+    volume_size = 100
+    volume_type = "gp3"
+    encrypted   = true
+  }
+  
+  # Ensure proper storage for Tableau Server
+  ebs_block_device {
+    device_name = "/dev/sdb"
+    volume_size = 200
+    volume_type = "gp3"
+    encrypted   = true
+    delete_on_termination = true
+  }
+  
+  tags = {
+    Name        = "${var.project_name}-tableau-server"
+    Environment = var.environment
+  }
+}
+
+# Security Group for Tableau Server
+resource "aws_security_group" "tableau_sg" {
+  name        = "${var.project_name}-tableau-sg"
+  description = "Security group for Tableau Server"
+  vpc_id      = var.vpc_id
+  
+  # Tableau Server Web UI
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr_block]  # Only allow access from within the VPC
+  }
+  
+  # Tableau Server Web UI (SSL)
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr_block]  # Only allow access from within the VPC
+  }
+  
+  # Tableau Server Admin
+  ingress {
+    from_port   = 8850
+    to_port     = 8850
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr_block]  
+  }
+  
+  # SSH access for administration
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr_block]  
+  }
+  
+  # Outbound traffic limited to VPC
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = [var.vpc_cidr_block]  
+  }
+  
+  tags = {
+    Name        = "${var.project_name}-tableau-sg"
+    Environment = var.environment
+  }
+}
+
+# IAM Role for Tableau Server
+resource "aws_iam_role" "tableau_role" {
+  name = "${var.project_name}-tableau-role"
+  
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+  
+  tags = {
+    Name        = "${var.project_name}-tableau-role"
+    Environment = var.environment
+  }
+}
+
+# IAM Policy for Tableau Server to access Redshift
+resource "aws_iam_policy" "tableau_redshift_access" {
+  name        = "${var.project_name}-tableau-redshift-access"
+  description = "Policy for Tableau Server to access Redshift"
+  
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "redshift:DescribeClusters",
+          "redshift:DescribeClusterParameters",
+          "redshift:GetClusterCredentials"
+        ]
+        Effect   = "Allow"
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# Attach policy to the role
+resource "aws_iam_role_policy_attachment" "tableau_redshift_access" {
+  role       = aws_iam_role.tableau_role.name
+  policy_arn = aws_iam_policy.tableau_redshift_access.arn
+}
+
+# IAM Policy for Tableau to use SSM
+resource "aws_iam_policy" "tableau_ssm_access" {
+  name        = "${var.project_name}-tableau-ssm-access"
+  description = "Policy for Tableau Server to use SSM"
+  
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath"
+        ]
+        Effect   = "Allow"
+        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/*"
+      }
+    ]
+  })
+}
+
+# Attach SSM policy to the role
+resource "aws_iam_role_policy_attachment" "tableau_ssm_access" {
+  role       = aws_iam_role.tableau_role.name
+  policy_arn = aws_iam_policy.tableau_ssm_access.arn
+}
+
+# IAM Instance Profile for Tableau Server
+resource "aws_iam_instance_profile" "tableau_instance_profile" {
+  name = "${var.project_name}-tableau-profile"
+  role = aws_iam_role.tableau_role.name
+}
+
+# =================== VPC ENDPOINTS FOR PRIVATE ACCESS ===================
+
+# SSM VPC Endpoints (for management)
+resource "aws_vpc_endpoint" "ssm" {
+  vpc_id              = var.vpc_id
+  service_name        = "com.amazonaws.${var.aws_region}.ssm"
+  vpc_endpoint_type   = "Interface"
+  private_dns_enabled = true
+  subnet_ids          = [var.tableau_subnet_id]
+  security_group_ids  = [aws_security_group.vpc_endpoint_sg.id]
+  
+  tags = {
+    Name        = "${var.project_name}-ssm-endpoint"
+    Environment = var.environment
+  }
+}
+
+resource "aws_vpc_endpoint" "ssm_messages" {
+  vpc_id              = var.vpc_id
+  service_name        = "com.amazonaws.${var.aws_region}.ssmmessages"
+  vpc_endpoint_type   = "Interface"
+  private_dns_enabled = true
+  subnet_ids          = [var.tableau_subnet_id]
+  security_group_ids  = [aws_security_group.vpc_endpoint_sg.id]
+  
+  tags = {
+    Name        = "${var.project_name}-ssm-messages-endpoint"
+    Environment = var.environment
+  }
+}
+
+# EC2 VPC Endpoint
+resource "aws_vpc_endpoint" "ec2" {
+  vpc_id              = var.vpc_id
+  service_name        = "com.amazonaws.${var.aws_region}.ec2"
+  vpc_endpoint_type   = "Interface"
+  private_dns_enabled = true
+  subnet_ids          = [var.tableau_subnet_id]
+  security_group_ids  = [aws_security_group.vpc_endpoint_sg.id]
+  
+  tags = {
+    Name        = "${var.project_name}-ec2-endpoint"
+    Environment = var.environment
+  }
+}
+
+# S3 VPC Endpoint (for software downloads and updates)
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = var.vpc_id
+  service_name      = "com.amazonaws.${var.aws_region}.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = [var.private_route_table_id]
+  
+  tags = {
+    Name        = "${var.project_name}-s3-endpoint"
+    Environment = var.environment
+  }
+}
+
+# Security Group for VPC Endpoints
+resource "aws_security_group" "vpc_endpoint_sg" {
+  name        = "${var.project_name}-vpc-endpoint-sg"
+  description = "Security group for VPC endpoints"
+  vpc_id      = var.vpc_id
+  
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr_block]
+  }
+  
+  tags = {
+    Name        = "${var.project_name}-vpc-endpoint-sg"
+    Environment = var.environment
+  }
+}
+
+
+
+
+
+==========================
+
+
+
+
+
+
+
+output "s3_staging_bucket_name" {
+  description = "The name of the S3 staging bucket"
+  value       = aws_s3_bucket.staging_bucket.bucket
+}
+
+output "s3_staging_bucket_arn" {
+  description = "The ARN of the S3 staging bucket"
+  value       = aws_s3_bucket.staging_bucket.arn
+}
+
+output "glue_database_name" {
+  description = "The name of the Glue catalog database"
+  value       = aws_glue_catalog_database.glue_database.name
+}
+
+output "daily_crawler_name" {
+  description = "The name of the daily Glue crawler"
+  value       = aws_glue_crawler.daily_crawler.name
+}
+
+output "event_crawler_name" {
+  description = "The name of the event-triggered Glue crawler"
+  value       = aws_glue_crawler.event_crawler.name
+}
+
+output "daily_etl_job_name" {
+  description = "The name of the daily ETL Glue job"
+  value       = aws_glue_job.daily_etl_job.name
+}
+
+output "event_etl_job_name" {
+  description = "The name of the event-triggered ETL Glue job"
+  value       = aws_glue_job.event_etl_job.name
+}
+
+output "lambda_function_name" {
+  description = "The name of the Lambda function for ETL triggering"
+  value       = aws_lambda_function.etl_trigger.function_name
+}
+
+output "lambda_function_arn" {
+  description = "The ARN of the Lambda function for ETL triggering"
+  value       = aws_lambda_function.etl_trigger.arn
+}
+
+output "scheduled_lambda_function_name" {
+  description = "The name of the Lambda function for scheduled ETL triggering"
+  value       = aws_lambda_function.scheduled_etl_trigger.function_name
+}
+
+output "scheduled_lambda_function_arn" {
+  description = "The ARN of the Lambda function for scheduled ETL triggering"
+  value       = aws_lambda_function.scheduled_etl_trigger.arn
+}
+
+output "api_endpoint" {
+  description = "The endpoint URL for the ETL API"
+  value       = "${aws_apigatewayv2_api.etl_api.api_endpoint}/trigger-etl"
+}
+
+output "redshift_cluster_endpoint" {
+  description = "The endpoint for the Redshift cluster"
+  value       = aws_redshift_cluster.data_product.endpoint
+}
+
+output "redshift_cluster_jdbc_url" {
+  description = "The JDBC URL for connecting to the Redshift cluster"
+  value       = "jdbc:redshift://${aws_redshift_cluster.data_product.endpoint}/${aws_redshift_cluster.data_product.database_name}"
+}
+
+# Tableau Server outputs
+output "tableau_server_instance_id" {
+  description = "The ID of the Tableau Server instance"
+  value       = aws_instance.tableau_server.id
+}
+
+output "tableau_server_private_ip" {
+  description = "The private IP address of the Tableau Server"
+  value       = aws_instance.tableau_server.private_ip
+}
+
+output "tableau_server_private_dns" {
+  description = "The private DNS name of the Tableau Server"
+  value       = aws_instance.tableau_server.private_dns
+}
+
+output "tableau_security_group_id" {
+  description = "The ID of the security group associated with the Tableau Server"
+  value       = aws_security_group.tableau_sg.id
+}
+
+output "vpc_endpoints" {
+  description = "List of VPC endpoint IDs created for Tableau Server"
+  value = {
+    ssm          = aws_vpc_endpoint.ssm.id
+    ssm_messages = aws_vpc_endpoint.ssm_messages.id
+    ec2          = aws_vpc_endpoint.ec2.id
+    s3           = aws_vpc_endpoint.s3.id
+  }
+}
+
+
+
+
+
+================
+
+
+
+
+variable "aws_region" {
+  description = "The AWS region to deploy resources"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "project_name" {
+  description = "The name of the project, used for naming resources"
+  type        = string
+  default     = "crada"
+}
+
+variable "environment" {
+  description = "The deployment environment (dev, staging, production)"
+  type        = string
+  default     = "dev"
+
+  validation {
+    condition     = contains(["dev", "staging", "production"], var.environment)
+    error_message = "The environment must be one of: dev, staging, production."
+  }
+}
+
+variable "redshift_database" {
+  description = "The name of the Redshift database"
+  type        = string
+  default     = "dataproduct"
+}
+
+variable "redshift_schema" {
+  description = "The schema in the Redshift database for ETL output"
+  type        = string
+  default     = "etl_data"
+}
+
+variable "redshift_username" {
+  description = "The username for the Redshift database"
+  type        = string
+  default     = "admin"
+  sensitive   = true
+}
+
+variable "redshift_password" {
+  description = "The password for the Redshift database"
+  type        = string
+  sensitive   = true
+}
+
+variable "redshift_node_type" {
+  description = "The node type for the Redshift cluster"
+  type        = string
+  default     = "dc2.large"
+}
+
+variable "redshift_node_count" {
+  description = "The number of nodes in the Redshift cluster"
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.redshift_node_count >= 1
+    error_message = "The number of nodes must be at least 1."
+  }
+}
+
+variable "tags" {
+  description = "Additional tags for all resources"
+  type        = map(string)
+  default     = {}
+}
+
 # Variables for Tableau Server deployment
 variable "tableau_ami_id" {
   description = "AMI ID for Tableau Server instance"
@@ -7,28 +707,30 @@ variable "tableau_ami_id" {
 variable "tableau_instance_type" {
   description = "EC2 instance type for Tableau Server"
   type        = string
-  default     = "r5.2xlarge"
+  default     = "r5.2xlarge" 
 }
 
 variable "tableau_subnet_id" {
   description = "Subnet ID where Tableau Server will be deployed"
   type        = string
-  default     = ""
 }
 
 variable "vpc_id" {
   description = "VPC ID where Tableau Server will be deployed"
   type        = string
-  default     = ""
+}
+
+variable "vpc_cidr_block" {
+  description = "CIDR block for the VPC"
+  type        = string
+}
+
+variable "private_route_table_id" {
+  description = "Route table ID for the private subnet"
+  type        = string
 }
 
 variable "key_pair_name" {
   description = "Name of the key pair to use for SSH access to the Tableau Server"
   type        = string
-  default     = ""
-}
-
-variable "allowed_cidr_blocks" {
-  description = "CIDR blocks allowed to access Tableau Server"
-  type        = list(string)
 }
