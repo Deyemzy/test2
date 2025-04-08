@@ -1,1 +1,4 @@
-vvv
+# Using PowerShell to download installer
+$url = "https://downloads.tableau.com/esdalt/2023.3.1/TableauServer-64bit-2023-3-1.exe"
+$output = "C:\TableauServer\TableauServer-64bit-2023-3-1.exe"
+Invoke-WebRequest -Uri $url -OutFile $output
