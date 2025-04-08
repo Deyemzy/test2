@@ -1,22 +1,203 @@
-// Get the full file path
-set fullPath "${File}"
 
-// Extract just the filename from the path
-set fileName "${fullPath##*/}"
 
-// Get the parent directory
-set parentDir "${FileParentDirectory}"
+# Tableau Server EC2 Instance
+resource "aws_instance" "tableau_server" {
+  ami                    = var.tableau_ami_id
+  instance_type          = var.tableau_instance_type
+  subnet_id              = var.tableau_subnet_id
+  vpc_security_group_ids = [aws_security_group.tableau_sg.id]
+  key_name               = var.key_pair_name
+  iam_instance_profile   = aws_iam_instance_profile.tableau_instance_profile.name
 
-// Find the position of the last dot in the filename
-set lastDot "${fileName.lastIndexOf('.')}"
+  root_block_device {
+    volume_size = 100
+    volume_type = "gp3"
+    encrypted   = true
+  }
 
-// Create the new filename with _processed before the extension
-set baseName "${fileName.substring(0, lastDot)}"
-set extension "${fileName.substring(lastDot)}"
-set newName "${baseName}_processed${extension}"
+  tags = {
+    Name        = "${var.project_name}-tableau-server"
+    Environment = var.environment
+  }
+}
 
-// Rename the file
-lrename "${fullPath}" "${parentDir}/${newName}"
+# Security Group for Tableau Server
+resource "aws_security_group" "tableau_sg" {
+  name        = "${var.project_name}-tableau-sg"
+  description = "Security group for Tableau Server"
+  vpc_id      = var.vpc_id
 
-// Log the action
-msg "File renamed from ${fileName} to ${newName}"
+  # Tableau Server Web UI
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_cidr_blocks
+  }
+
+  # Tableau Server Web UI (SSL)
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_cidr_blocks
+  }
+
+  # Tableau Server Admin
+  ingress {
+    from_port   = 8850
+    to_port     = 8850
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_cidr_blocks
+  }
+
+  # SSH access
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_cidr_blocks
+  }
+
+  # Allow all outbound traffic
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name        = "${var.project_name}-tableau-sg"
+    Environment = var.environment
+  }
+}
+
+# IAM Role for Tableau Server
+resource "aws_iam_role" "tableau_role" {
+  name = "${var.project_name}-tableau-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Name        = "${var.project_name}-tableau-role"
+    Environment = var.environment
+  }
+}
+
+# IAM Policy for Tableau Server to access Redshift
+resource "aws_iam_policy" "tableau_redshift_access" {
+  name        = "${var.project_name}-tableau-redshift-access"
+  description = "Policy for Tableau Server to access Redshift"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "redshift:DescribeClusters",
+          "redshift:DescribeClusterParameters",
+          "redshift:GetClusterCredentials"
+        ]
+        Effect   = "Allow"
+        Resource = aws_redshift_cluster.data_product.arn
+      }
+    ]
+  })
+}
+
+# Attach policy to the role
+resource "aws_iam_role_policy_attachment" "tableau_redshift_access" {
+  role       = aws_iam_role.tableau_role.name
+  policy_arn = aws_iam_policy.tableau_redshift_access.arn
+}
+
+# IAM Policy for Tableau to use SSM
+resource "aws_iam_policy" "tableau_ssm_access" {
+  name        = "${var.project_name}-tableau-ssm-access"
+  description = "Policy for Tableau Server to use SSM"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath"
+        ]
+        Effect   = "Allow"
+        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/*"
+      }
+    ]
+  })
+}
+
+# Attach SSM policy to the role
+resource "aws_iam_role_policy_attachment" "tableau_ssm_access" {
+  role       = aws_iam_role.tableau_role.name
+  policy_arn = aws_iam_policy.tableau_ssm_access.arn
+}
+
+# IAM Instance Profile for Tableau Server
+resource "aws_iam_instance_profile" "tableau_instance_profile" {
+  name = "${var.project_name}-tableau-profile"
+  role = aws_iam_role.tableau_role.name
+}
+
+# Elastic IP for Tableau Server
+resource "aws_eip" "tableau_eip" {
+  domain   = "vpc"
+  instance = aws_instance.tableau_server.id
+
+  tags = {
+    Name        = "${var.project_name}-tableau-eip"
+    Environment = var.environment
+  }
+}
+
+
+
+========
+
+
+output "tableau_server_url" {
+  description = "URL for accessing Tableau Server"
+  value       = "http://${aws_eip.tableau_eip.public_ip}"
+}
+
+output "tableau_server_ssl_url" {
+  description = "SSL URL for accessing Tableau Server"
+  value       = "https://${aws_eip.tableau_eip.public_ip}"
+}
+
+output "tableau_admin_url" {
+  description = "URL for Tableau Server Admin"
+  value       = "https://${aws_eip.tableau_eip.public_ip}:8850"
+}
+
+
+
+
+=====
+
+ VPC and network configuration
+vpc_id            = "xxx
+tableau_subnet_id = "xxxx"
+
+# Tableau Server configuration
+tableau_ami_id        = "xxxx"
+tableau_instance_type = "r5.2xlarge"
+key_pair_name         = "xxxx"
+allowed_cidr_blocks   = [xxxx]
